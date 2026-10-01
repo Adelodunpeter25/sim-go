@@ -23,7 +23,7 @@ Core rules for every phase:
 
 - [x] `Driver` interface (`List/Boot/Shutdown/Slim/Restore/Tap/Swipe/Type/Key/OpenURL/Screenshot`)
 - [x] iOS driver via `xcrun simctl` (proven: 32s boot incl. compile, launch, screenshot)
-- [x] Android driver via `adb` + `emulator` (headless, `-gpu host`, `-memory 2048`)
+- [x] Android driver via `adb` + `emulator` (headless, `-gpu host`, `-memory 4096`)
 - [x] Fixed slim profile (iOS ~130 `launchd` labels, Android ~40 packages; keeps push/StoreKit/universal-links)
 - [x] Thin stdlib CLI mirroring the SDK
 

@@ -63,7 +63,7 @@ func (Driver) List(ctx context.Context) ([]driver.Device, error) {
 }
 
 // Boot starts an AVD by name headless with sensible defaults:
-// -no-boot-anim -gpu host -memory 2048, then waits for boot_completed.
+// -no-boot-anim -gpu host -memory 4096, then waits for boot_completed.
 // Pass the AVD name (ID with State "avd") or an already-connected serial
 // (no-op: returns nil if `adb -s <id> shell getprop sys.boot_completed` is 1).
 func (Driver) Boot(ctx context.Context, id string) error {
@@ -76,7 +76,7 @@ func (Driver) Boot(ctx context.Context, id string) error {
 	}
 	ram := os.Getenv("SIM_GO_ANDROID_RAM_MB")
 	if ram == "" {
-		ram = "2048"
+		ram = "4096"
 	}
 	// GPU mode override: -gpu host is fast but breaks the hardware frame path
 	// (and with it screenrecord/scrcpy) on some hosts; swiftshader_indirect

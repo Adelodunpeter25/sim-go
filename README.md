@@ -27,7 +27,7 @@ sim-go screenshot <platform> <id> <out.png>
 ```
 
 - iOS (`internal/ios`): `xcrun simctl list/boot/shutdown/io/openurl`. macOS only.
-- Android (`internal/android`): `adb devices/shell input/screencap`, `emulator -avd -no-boot-anim -gpu host -memory 2048`. mac + Linux.
+- Android (`internal/android`): `adb devices/shell input/screencap`, `emulator -avd -no-boot-anim -gpu host -memory 4096`. mac + Linux.
 - Live Android video+input (`internal/scrcpy`): pinned scrcpy-server v2.7
   (auto-fetched once, cached; Apache-2.0 Genymobile) pushed to the device and
   spoken to over an adb tunnel — H.264 in, touch/key/text control out. No
@@ -46,7 +46,7 @@ go run ./cmd/sim-go list
 go run ./cmd/sim-go list -platform android
 ```
 
-Env: `ANDROID_HOME`, `SIM_GO_ANDROID_RAM_MB` (default 2048),
+Env: `ANDROID_HOME`, `SIM_GO_ANDROID_RAM_MB` (default 4096),
 `SIM_GO_ANDROID_GPU` (`host` default, or `swiftshader_indirect` where host GL
 starves the video encoder — observed on Intel mac),
 `SIM_GO_SCRCPY_SERVER` (override pinned scrcpy-server binary path).

@@ -53,7 +53,7 @@ usage:
 
 env:
   ANDROID_HOME             Android SDK location (adb/emulator discovery)
-  SIM_GO_ANDROID_RAM_MB    guest RAM for boot android (default 2048)
+  SIM_GO_ANDROID_RAM_MB    guest RAM for boot android (default 4096)
   SIM_GO_ANDROID_GPU       emulator GPU: host (default, fast) or swiftshader_indirect
                            (software; needed where host GL starves the video
                            encoder — observed on Intel mac, screenrecord/scrcpy
