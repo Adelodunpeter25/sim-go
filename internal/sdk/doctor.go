@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+
+	"github.com/Adelodunpeter25/sim-go/internal/android"
 )
 
 // Diagnostics mirrors what console's device service needs before touching a
@@ -41,7 +43,7 @@ func (c *Client) Doctor(ctx context.Context) Diagnostics {
 	if err := c.drivers["android"].Available(ctx); err == nil {
 		d.ADBAvailable = true
 	}
-	if _, err := exec.LookPath("emulator"); err == nil {
+	if android.EmulatorBin() != "" {
 		d.EmulatorAvail = true
 	}
 	var fs syscall.Statfs_t

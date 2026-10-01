@@ -21,24 +21,58 @@ type Driver struct{}
 
 func (Driver) Name() string { return "android" }
 
-func adbPath() string {
+func sdkDir(candidates ...string) string {
 	if p := os.Getenv("ANDROID_HOME"); p != "" {
-		cand := filepath.Join(p, "platform-tools", "adb")
-		if _, err := os.Stat(cand); err == nil {
-			return cand
-		}
+		candidates = append([]string{p}, candidates...)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		cand := filepath.Join(home, "Library", "Android", "sdk", "platform-tools", "adb")
-		if _, err := os.Stat(cand); err == nil {
-			return cand
+		candidates = append(candidates,
+			filepath.Join(home, "Library", "Android", "sdk"),
+			filepath.Join(home, "Android", "Sdk"),
+		)
+	}
+	for _, base := range candidates {
+		if base == "" {
+			continue
 		}
-		cand = filepath.Join(home, "Android", "Sdk", "platform-tools", "adb")
-		if _, err := os.Stat(cand); err == nil {
+		if _, err := os.Stat(base); err == nil {
+			return base
+		}
+	}
+	return ""
+}
+
+func adbPath() string {
+	if sdk := sdkDir(); sdk != "" {
+		if cand := filepath.Join(sdk, "platform-tools", "adb"); isExec(cand) {
 			return cand
 		}
 	}
+	if p, err := exec.LookPath("adb"); err == nil {
+		return p
+	}
 	return "adb"
+}
+
+// EmulatorBin finds the emulator binary via SDK dirs first, then PATH.
+func EmulatorBin() string {
+	if sdk := sdkDir(); sdk != "" {
+		if cand := filepath.Join(sdk, "emulator", "emulator"); isExec(cand) {
+			return cand
+		}
+	}
+	if p, err := exec.LookPath("emulator"); err == nil {
+		return p
+	}
+	return ""
+}
+
+func isExec(p string) bool {
+	fi, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	return !fi.IsDir() && fi.Mode()&0o111 != 0
 }
 
 func adb(ctx context.Context, args ...string) ([]byte, error) {
@@ -54,7 +88,7 @@ func (Driver) Available(ctx context.Context) error {
 	defer cancel()
 	if _, err := exec.LookPath(adbPath()); err != nil {
 		// adbPath may be absolute; check runnable instead.
-		if _, statErr := os.Stat(adbPath()); statErr != nil {
+		if !isExec(adbPath()) {
 			return fmt.Errorf("adb not found (set ANDROID_HOME): %w", err)
 		}
 	}
@@ -92,8 +126,8 @@ func (Driver) List(ctx context.Context) ([]driver.Device, error) {
 		}
 		devs = append(devs, driver.Device{Platform: "android", ID: serial, Name: name, State: state})
 	}
-	// AVDs known but not booted.
-	if emu, err := exec.LookPath("emulator"); err == nil {
+	// AVDs known but not booted (SDK dirs first, then PATH).
+	if emu := EmulatorBin(); emu != "" {
 		ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		if out, err := exec.CommandContext(ctx2, emu, "-list-avds").CombinedOutput(); err == nil {
@@ -126,9 +160,9 @@ func (Driver) Boot(ctx context.Context, id string) error {
 	if completed(ctx, id) {
 		return nil
 	}
-	emu, err := exec.LookPath("emulator")
-	if err != nil {
-		return fmt.Errorf("emulator not found in PATH (install Android SDK emulator): %w", err)
+	emu := EmulatorBin()
+	if emu == "" {
+		return fmt.Errorf("emulator not found (install Android SDK emulator or set ANDROID_HOME)")
 	}
 	ram := os.Getenv("SIM_GO_ANDROID_RAM_MB")
 	if ram == "" {
