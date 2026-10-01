@@ -28,6 +28,11 @@ sim-go screenshot <platform> <id> <out.png>
 
 - iOS (`internal/ios`): `xcrun simctl list/boot/shutdown/io/openurl`. macOS only.
 - Android (`internal/android`): `adb devices/shell input/screencap`, `emulator -avd -no-boot-anim -gpu host -memory 2048`. mac + Linux.
+- Live Android video+input (`internal/scrcpy`): pinned scrcpy-server v2.7
+  (auto-fetched once, cached; Apache-2.0 Genymobile) pushed to the device and
+  spoken to over an adb tunnel — H.264 in, touch/key/text control out. No
+  scrcpy install needed anywhere. Proven live: `sim-go stream-probe android
+  Pixel_7` → handshake 576x1280, 35KB keyframe, center tap injected.
 - Slim is one **fixed** profile (`internal/slim/profile.go`), no flags by design:
   - iOS: ~130 `launchd` labels (search, iCloud, Siri, widgets, telemetry, photos-analysis, family, health, news/weather/maps, messaging). Keeps push (`apsd`), StoreKit, universal-links (`swcd`), `sharingd` running.
   - Android: ~40 bloat packages via `pm disable-user` (maps/photos/assistant/chrome/wellbeing/...). `restore` re-enables.
@@ -41,7 +46,10 @@ go run ./cmd/sim-go list
 go run ./cmd/sim-go list -platform android
 ```
 
-Env: `ANDROID_HOME`, `SIM_GO_ANDROID_RAM_MB` (default 2048).
+Env: `ANDROID_HOME`, `SIM_GO_ANDROID_RAM_MB` (default 2048),
+`SIM_GO_ANDROID_GPU` (`host` default, or `swiftshader_indirect` where host GL
+starves the video encoder — observed on Intel mac),
+`SIM_GO_SCRCPY_SERVER` (override pinned scrcpy-server binary path).
 
 ## Layout
 
@@ -50,10 +58,11 @@ cmd/sim-go/main.go        CLI (thin consumer of internal/sdk)
 internal/driver/driver.go Driver interface + Device
 internal/sdk/             embeddable facade (Client, Doctor, Normalize) — the product
 internal/slim/profile.go  fixed slim sets (from simslim categories + avdslim-style list)
-internal/ios/ios.go       simctl driver (darwin only)
-internal/android/android.go adb/emulator driver (darwin+linux)
+internal/ios/              simctl driver: ios.go, devices.go, apps.go, slim.go, input.go (darwin only)
+internal/android/          adb/emulator driver: android.go, discover.go, devices.go, apps.go, slim.go, input.go
+internal/scrcpy/          live Android video+input: scrcpy.go, session.go, video.go, control.go
 reference/simslim         MobAI-App/simslim clone (study only, MIT)
-reference/simfleet        entropyconquers/simfleet clone (study only, MIT)
+reference/simfleet        entropyconquers/simfleet clone (study only, MIT) + scrcpy (Apache-2.0) protocol source
 ```
 
 ## v1 limits (honest)
@@ -63,7 +72,8 @@ reference/simfleet        entropyconquers/simfleet clone (study only, MIT)
   t3code solves this with an agent-device/baguette helper (Phase 4 scope). The SDK
   fails loudly with guidance instead of passing cryptic simctl errors. Use
   `launch`/`open-url` for now.
-- Android paths are compile-tested only here (no `emulator` binary on this host;
-  `doctor` reports this honestly).
+- Android video needs working on-device encoding: `-gpu host` starves the
+  encoder on Intel mac (screenrecord/scrcpy get zero frames); boot with
+  `SIM_GO_ANDROID_GPU=swiftshader_indirect` there.
 - iOS slim is live-session (`disable` + `bootout`, simslim `--no-reboot` path): persists across reboots on iOS 18.5+, session-only below.
 - No server/dashboard/lanes/Metro (simfleet scope) — CLI + library only per v1 decision.

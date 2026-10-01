@@ -1,6 +1,7 @@
 package android
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -78,15 +79,17 @@ func (Driver) OpenURL(ctx context.Context, id, url string) error {
 func (Driver) Screenshot(ctx context.Context, id, outPath string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, adbPath(), "-s", id, "exec-out", "screencap", "-p")
 	f, err := os.Create(outPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	cmd := exec.CommandContext(ctx, adbPath(), "-s", id, "exec-out", "screencap", "-p")
 	cmd.Stdout = f
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("screencap: %w: %s", err, strings.TrimSpace(string(out)))
+	var serr bytes.Buffer
+	cmd.Stderr = &serr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("screencap: %w: %s", err, strings.TrimSpace(serr.String()))
 	}
 	return nil
 }

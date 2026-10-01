@@ -68,8 +68,11 @@ Done when: a browser page shows a live sim and taps land via normalized coords.
 
 This phase buys the near-zero latency. Only starts after Phase 3 works.
 
-- [ ] Per-device persistent capture session (host-frambuffer → hardware H.264, one encoder per device)
-- [ ] WS multiplex: frames out + input tags back on one socket (iOS AVCC-style / Android scrcpy-style framing)
+- [x] Per-device server-side session (scrcpy-server v2.7 pinned, auto-fetched;
+  H.264 handshake + keyframe + touch/key/text injection proven live via
+  `stream-probe`; no scrcpy install needed on the host)
+- [ ] WS multiplex: frames out + input tags back on one socket (one session
+  shared by N viewers; late joiners get config + keyframe + reset)
 - [ ] WebCodecs-capable viewer contract (server encodes once; any client — desktop, web, iOS app — just decodes)
 - [ ] Session lifecycle: survive app backgrounding, re-keyframe on reattach, clean kill on shutdown
 

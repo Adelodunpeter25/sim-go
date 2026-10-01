@@ -29,7 +29,8 @@ func (Driver) List(ctx context.Context) ([]driver.Device, error) {
 		if strings.HasPrefix(serial, "emulator-") {
 			if avd, err := adb(ctx, "-s", serial, "emu", "avd", "name"); err == nil {
 				if n := strings.TrimSpace(string(avd)); n != "" {
-					name = strings.SplitN(n, "\n", 2)[0]
+					// adb shell appends \r; strip it so names compare equal.
+					name = strings.TrimSpace(strings.SplitN(n, "\n", 2)[0])
 				}
 			}
 		}
@@ -77,7 +78,14 @@ func (Driver) Boot(ctx context.Context, id string) error {
 	if ram == "" {
 		ram = "2048"
 	}
-	args := []string{"-avd", id, "-no-boot-anim", "-gpu", "host", "-memory", ram, "-no-snapshot"}
+	// GPU mode override: -gpu host is fast but breaks the hardware frame path
+	// (and with it screenrecord/scrcpy) on some hosts; swiftshader_indirect
+	// is the software fallback.
+	gpu := os.Getenv("SIM_GO_ANDROID_GPU")
+	if gpu == "" {
+		gpu = "host"
+	}
+	args := []string{"-avd", id, "-no-boot-anim", "-gpu", gpu, "-memory", ram, "-no-snapshot"}
 	logF, _ := os.CreateTemp("", "sim-go-emulator-*.log")
 	cmd := exec.Command(emu, args...)
 	if logF != nil {

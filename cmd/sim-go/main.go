@@ -27,6 +27,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Adelodunpeter25/sim-go/internal/scrcpy"
 	"github.com/Adelodunpeter25/sim-go/internal/sdk"
 )
 
@@ -53,6 +54,13 @@ usage:
 env:
   ANDROID_HOME             Android SDK location (adb/emulator discovery)
   SIM_GO_ANDROID_RAM_MB    guest RAM for boot android (default 2048)
+  SIM_GO_ANDROID_GPU       emulator GPU: host (default, fast) or swiftshader_indirect
+                           (software; needed where host GL starves the video
+                           encoder — observed on Intel mac, screenrecord/scrcpy
+                           get zero frames with -gpu host)
+  SIM_GO_SCRCPY_SERVER     override path to scrcpy-server binary (default:
+                           pinned v2.7 auto-downloaded once from GitHub
+                           releases, cached; no scrcpy install needed)
 `, version)
 }
 
@@ -195,6 +203,9 @@ func main() {
 	case "screenshot":
 		needArgs(5, "screenshot <platform> <id> <out.png>")
 		ok("screenshot", c.Screenshot(ctx, os.Args[2], os.Args[3], os.Args[4]))
+	case "stream-probe":
+		needArgs(4, "stream-probe android <avd|serial>")
+		runStreamProbe(ctx, c, os.Args[2], os.Args[3])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		usage()
@@ -206,6 +217,57 @@ func needArgs(n int, use string) {
 	if len(os.Args) != n {
 		die("usage: sim-go " + use)
 	}
+}
+
+// runStreamProbe opens a live scrcpy session, waits for the first key frame
+// (proving H.264 flows), taps screen center, and closes. Diagnostic for the
+// Phase 4 streaming work; the browser WS multiplex comes later.
+func runStreamProbe(ctx context.Context, c *sdk.Client, platform, id string) {
+	if platform != "android" {
+		die("stream-probe only supports android in v1")
+	}
+	serial := id
+	if !isSerial(id) {
+		devs, err := c.ListAll(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "stream-probe: list: %v\n", err)
+			os.Exit(1)
+		}
+		found := false
+		for _, d := range devs {
+			if d.Platform == "android" && d.Name == id && isSerial(d.ID) {
+				serial = d.ID
+				found = true
+				break
+			}
+		}
+		if !found {
+			fmt.Fprintf(os.Stderr, "stream-probe: no booted emulator for AVD %q (boot it first)\n", id)
+			os.Exit(1)
+		}
+	}
+	sess, err := scrcpy.Start(ctx, serial)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stream-probe: start: %v\n", err)
+		os.Exit(1)
+	}
+	defer sess.Close()
+	fmt.Printf("stream: %s %dx%d (%s)\n", sess.Meta.Name, sess.Meta.Width, sess.Meta.Height, serial)
+	frame, err := sess.WaitKeyframe(30 * time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stream-probe: keyframe: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("keyframe: %d bytes H.264\n", len(frame.Payload))
+	if err := sess.Tap(sess.Meta.Width/2, sess.Meta.Height/2); err != nil {
+		fmt.Fprintf(os.Stderr, "stream-probe: tap: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("tap: ok (center)")
+}
+
+func isSerial(id string) bool {
+	return len(id) > 9 && id[:9] == "emulator-"
 }
 
 func die(msg string) {
