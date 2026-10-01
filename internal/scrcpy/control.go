@@ -102,6 +102,9 @@ func (s *Session) sendControl(msg []byte) error {
 	return nil
 }
 
+// SendRaw writes a pre-encoded control message (used by the WS hub).
+func (s *Session) SendRaw(msg []byte) error { return s.sendControl(msg) }
+
 // Tap injects down+up at device pixels.
 func (s *Session) Tap(x, y int) error {
 	if err := s.sendControl(EncodeTouch(TouchDown, x, y, s.Meta.Width, s.Meta.Height)); err != nil {

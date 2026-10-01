@@ -55,14 +55,14 @@ Go API — console adapts to us, not the other way around.
 
 Done when: console `server-go` imports the service package and its existing `device.rs` calls succeed against a local host. No GUI work here.
 
-## Phase 3 — Stills-first streaming
+## Phase 3 — Live streaming (screenshots skipped by design)
 
-Prove the server-owns-truth shape with cheap frames before touching video.
+Stills-first was dropped: the browser shows live H.264 or nothing.
 
-- [x] `Screenshot --watch` (page polls `GET /api/screenshot` at 1s)
-- [ ] MJPEG endpoint per device (screenshot polling is enough for now)
-- [x] Input over HTTP: click=tap, drag=swipe, type/key/press/open-url forms (coords scaled via natural image size)
-- [x] Security: loopback-only, no generic exec route (fixed verb endpoints only)
+- [x] Live H.264 over WS (`internal/scrcpy` session + `/api/stream`)
+- [ ] MJPEG endpoint: dropped, not needed with H.264 live
+- [x] Input over WS: canvas gestures as stream-pixel coords, key/text/button forms
+- [x] Security: loopback-only, no generic exec route (fixed verb endpoints + one WS route)
 
 Done when: a browser page shows a live sim and taps land via normalized coords.
 
@@ -73,9 +73,10 @@ This phase buys the near-zero latency. Only starts after Phase 3 works.
 - [x] Per-device server-side session (scrcpy-server v2.7 pinned, auto-fetched;
   H.264 handshake + keyframe + touch/key/text injection proven live via
   `stream-probe`; no scrcpy install needed on the host)
-- [ ] WS multiplex: frames out + input tags back on one socket (one session
-  shared by N viewers; late joiners get config + keyframe + reset)
-- [ ] WebCodecs-capable viewer contract (server encodes once; any client — desktop, web, iOS app — just decodes)
+- [x] WS multiplex: frames out + input tags back on one socket (one session
+  shared by N viewers; late joiners get meta + config + reset for a fresh keyframe)
+- [x] WebCodecs-capable viewer contract (server encodes once to AVCC + avcC;
+  page decodes; any client — desktop, web, iOS app — just decodes)
 - [ ] Session lifecycle: survive app backgrounding, re-keyframe on reattach, clean kill on shutdown
 
 Done when: swipe on a remote viewer feels instant; an iOS client can drive an Android emulator (server owns all device truth).

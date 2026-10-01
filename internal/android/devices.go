@@ -85,7 +85,7 @@ func (Driver) Boot(ctx context.Context, id string) error {
 	if gpu == "" {
 		gpu = "host"
 	}
-	args := []string{"-avd", id, "-no-boot-anim", "-gpu", gpu, "-memory", ram, "-no-snapshot"}
+	args := []string{"-avd", id, "-no-boot-anim", "-no-window", "-gpu", gpu, "-memory", ram, "-no-snapshot"}
 	logF, _ := os.CreateTemp("", "sim-go-emulator-*.log")
 	cmd := exec.Command(emu, args...)
 	if logF != nil {

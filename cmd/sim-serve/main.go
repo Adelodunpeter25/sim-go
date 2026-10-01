@@ -1,7 +1,8 @@
 // Command sim-serve previews sim-go's SDK in a browser.
 //
-// Thin HTTP skin over internal/sdk (the product). Stills-first: the page
-// polls screenshots and POSTs gestures; no build step, no dependencies.
+// Thin HTTP skin over internal/sdk (the product). Live H.264 for android via
+// scrcpy sessions over websocket; no screenshots anywhere on the browser
+// path. Single embedded page, no build step, no dependencies.
 //
 //	go run ./cmd/sim-serve [-addr 127.0.0.1:8790]
 //	open http://127.0.0.1:8790
@@ -31,13 +32,24 @@ var webFS embed.FS
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8790", "loopback listen address (do not expose to a network)")
 	flag.Parse()
-	c := sdk.New()
+	mux, err := newMux(sdk.New())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "web:", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "sim-serve on http://%s\n", *addr)
+	if err := http.ListenAndServe(*addr, mux); err != nil {
+		fmt.Fprintln(os.Stderr, "serve:", err)
+		os.Exit(1)
+	}
+}
+
+func newMux(c *sdk.Client) (*http.ServeMux, error) {
 	mux := http.NewServeMux()
 
 	web, err := fs.Sub(webFS, "web")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "web:", err)
-		os.Exit(1)
+		return nil, err
 	}
 	mux.Handle("/", http.FileServer(http.FS(web)))
 
@@ -229,28 +241,8 @@ func main() {
 		}
 		ok(w, nil)
 	})
-	mux.HandleFunc("/api/screenshot", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		tmp, err := os.CreateTemp("", "sim-go-shot-*.png")
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		path := tmp.Name()
-		_ = tmp.Close()
-		defer os.Remove(path)
-		if err := c.Screenshot(ctx(r), q.Get("platform"), q.Get("id"), path); err != nil {
-			fail(w, err)
-			return
-		}
-		w.Header().Set("Content-Type", "image/png")
-		w.Header().Set("Cache-Control", "no-store")
-		http.ServeFile(w, r, path)
-	})
+	hub := newStreamHub(c)
+	mux.HandleFunc("/api/stream", hub.attach)
 
-	fmt.Fprintf(os.Stderr, "sim-serve on http://%s\n", *addr)
-	if err := http.ListenAndServe(*addr, mux); err != nil {
-		fmt.Fprintln(os.Stderr, "serve:", err)
-		os.Exit(1)
-	}
+	return mux, nil
 }

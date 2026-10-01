@@ -46,10 +46,13 @@ single HTML file, no build step):
 go run ./cmd/sim-serve            # http://127.0.0.1:8790
 ```
 
-Device list, boot/shutdown/slim/normalize buttons, live screenshot view
-(click = tap, drag = swipe), app launch/terminate, type/key/press/open-url.
-Loopback only, no auth. Proven end-to-end: boot → tap → press → launch
-Settings → screenshot, all over HTTP.
+- Android: **live H.264** over `GET /api/stream?platform=android&id=` websocket
+  (scrcpy session per emulator, shared by N viewers; meta → avcC description →
+  tagged key/delta frames in, touch/scroll/key/text JSON back). Canvas gestures
+  drive it; WebCodecs decodes. No screenshots anywhere on the browser path.
+- iOS: device list, boot/shutdown/slim/normalize, launch, deep links — but no
+  screen yet (`simctl` has no video path; waits for the Phase 4 helper).
+- Loopback only, no auth.
 
 ## Build / run
 
