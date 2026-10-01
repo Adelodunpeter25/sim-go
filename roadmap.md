@@ -31,12 +31,12 @@ Core rules for every phase:
 
 Smallest missing blocks. Each is one SDK method + CLI verb + real-device test.
 
-- [ ] `Launch(ctx, id, bundleID)` / `Terminate(ctx, id, bundleID)` (iOS: `simctl launch/terminate`; Android: `am start` / `am force-stop`)
-- [ ] `Install(ctx, id, appPath)` / `Uninstall` (iOS: `simctl install/uninstall`; Android: `adb install/uninstall`)
-- [ ] `AppState` / `IsBooted` helpers (resolve-before-act: exact UDID/serial, never aliases like `all`)
-- [ ] `Doctor(ctx)` → `Diagnostics{Xcode, Simctl, ADB, Emulator, DiskFree}` (mirrors console `device.rs` diagnostics; powers `sim-go doctor --json`)
-- [ ] `Press(ctx, id, Home|Back|Lock|Power|VolumeUp|Down)` (iOS `simctl io button` vs Android `keyevent` behind one verb)
-- [ ] `Normalize(ctx, id)` — deterministic screenshots: disable animations, fixed clock/battery/locale (t3code `mobile-showcase.ts` pattern)
+- [x] `Launch(ctx, id, bundleID)` / `Terminate(ctx, id, bundleID)` (iOS: `simctl launch/terminate`; Android: `am start` / `am force-stop`)
+- [x] `Install(ctx, id, appPath)` / `Uninstall` (iOS: `simctl install/uninstall`; Android: `adb install/uninstall`)
+- [x] `AppState` / `IsBooted` helpers (resolve-before-act: exact UDID/serial, never aliases like `all`)
+- [x] `Doctor(ctx)` → `Diagnostics{Xcode, Simctl, ADB, Emulator, DiskFree}` (mirrors console `device.rs` diagnostics; powers `sim-go doctor --json`)
+- [x] `Press(ctx, id, Home|Back|Lock|Power|VolumeUp|Down)` (Android `keyevent` behind one verb; iOS returns explicit unsupported — `simctl io` has no button support, Phase 4 helper scope)
+- [x] `Normalize(ctx, id)` — deterministic screenshots: disable animations, fixed clock/battery/locale (t3code `mobile-showcase.ts` pattern)
 
 Done when: an agent can boot → install → launch → screenshot → terminate purely through SDK calls, tested on the iPhone 16e sim.
 

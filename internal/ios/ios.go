@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -187,17 +186,70 @@ func disabled(ctx context.Context, udid string) (map[string]bool, error) {
 }
 
 func (Driver) Tap(ctx context.Context, udid string, x, y int) error {
-	_, err := xcrun(ctx, "simctl", "io", udid, "tap", strconv.Itoa(x), strconv.Itoa(y))
-	return err
+	_, _, _ = ctx, x, y
+	// This Xcode's `simctl io` only offers enumerate/poll/recordVideo/
+	// screenshot (verified via `simctl io --help`): no tap/swipe/button.
+	// t3code solves this with an agent-device/baguette helper (Phase 4 scope).
+	return fmt.Errorf("ios tap not supported by simctl on this host (needs Phase 4 helper); use launch/open-url")
 }
 
 func (Driver) Swipe(ctx context.Context, udid string, x1, y1, x2, y2, ms int) error {
-	dur := fmt.Sprintf("%.2f", float64(ms)/1000.0)
-	_ = dur
-	// simctl io swipe has no duration flag; duration is ignored on ios.
-	_, err := xcrun(ctx, "simctl", "io", udid, "swipe",
-		strconv.Itoa(x1), strconv.Itoa(y1), strconv.Itoa(x2), strconv.Itoa(y2))
+	_, _, _, _, _, _ = ctx, x1, y1, x2, y2, ms
+	return fmt.Errorf("ios swipe not supported by simctl on this host (needs Phase 4 helper); use launch/open-url")
+}
+
+// Launch starts an app by bundle ID, terminating any running instance first
+// so the call is idempotent. Returns simctl's "<bundle>: <pid>" line.
+func (Driver) Launch(ctx context.Context, udid, bundle string) (string, error) {
+	out, err := xcrun(ctx, "simctl", "launch", "--terminate-running-process", udid, bundle)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (Driver) Terminate(ctx context.Context, udid, bundle string) error {
+	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "terminate", udid, bundle).CombinedOutput()
+	if err != nil {
+		// "found nothing to terminate" is already the desired state.
+		msg := string(out)
+		if strings.Contains(msg, "found nothing to terminate") || strings.Contains(msg, "not running") || strings.Contains(msg, "Invalid device state") {
+			return nil
+		}
+		return fmt.Errorf("simctl terminate: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (Driver) Install(ctx context.Context, udid, appPath string) error {
+	_, err := xcrun(ctx, "simctl", "install", udid, appPath)
 	return err
+}
+
+func (Driver) Uninstall(ctx context.Context, udid, bundle string) error {
+	_, err := xcrun(ctx, "simctl", "uninstall", udid, bundle)
+	return err
+}
+
+// IsInstalled queries one bundle via `simctl listapps <udid> <bundle>`:
+// simctl exits non-zero / prints nothing when the bundle is absent.
+func (Driver) IsInstalled(ctx context.Context, udid, bundle string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "listapps", udid, bundle).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "not installed") || strings.TrimSpace(string(out)) == "" {
+			return false, nil
+		}
+		// listapps exits 0 with "{}" for unknown bundles on some runtimes.
+		if strings.TrimSpace(string(out)) == "{}" {
+			return false, nil
+		}
+		return false, fmt.Errorf("simctl listapps: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" || trimmed == "{}" {
+		return false, nil
+	}
+	return strings.Contains(trimmed, bundle), nil
 }
 
 func (Driver) Type(ctx context.Context, udid, text string) error {
@@ -214,6 +266,25 @@ func (Driver) Key(ctx context.Context, udid, code string) error {
 func (Driver) OpenURL(ctx context.Context, udid, url string) error {
 	_, err := xcrun(ctx, "simctl", "openurl", udid, url)
 	return err
+}
+
+func (Driver) Press(ctx context.Context, udid, button string) error {
+	return fmt.Errorf("ios press %q not supported by simctl on this host (needs Phase 4 helper)", button)
+}
+
+// Normalize pins the status bar for deterministic screenshots.
+func (Driver) Normalize(ctx context.Context, udid string) error {
+	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "status_bar", udid, "override",
+		"--time", "9:41",
+		"--dataNetwork", "wifi",
+		"--wifiMode", "active", "--wifiBars", "3",
+		"--cellularMode", "active", "--cellularBars", "4",
+		"--batteryState", "charged", "--batteryLevel", "100",
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("status_bar override: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (Driver) Screenshot(ctx context.Context, udid, outPath string) error {

@@ -1,20 +1,25 @@
 // Command sim-go drives iOS simulators and Android emulators.
 //
-// Usage:
+// Thin consumer of internal/sdk (the embeddable product). Usage:
 //
 //	sim-go list [-platform ios|android]
-//	sim-go boot <ios|android> <id>        # UDID for ios, AVD name or serial for android
-//	sim-go shutdown|slim|restore <ios|android> <id>
+//	sim-go doctor
+//	sim-go boot|shutdown|slim|restore|normalize <ios|android> <id>
+//	sim-go launch <platform> <id> <bundle|package>
+//	sim-go terminate|uninstall <platform> <id> <bundle|package>
+//	sim-go install <platform> <id> <app.apk|.app>
+//	sim-go press <platform> <id> <home|back|lock|power|volume-up|volume-down|menu>
 //	sim-go tap <platform> <id> <x> <y>
 //	sim-go swipe <platform> <id> <x1> <y1> <x2> <y2> [ms]
 //	sim-go type <platform> <id> <text...>
-//	sim-go key <platform> <id> <code>     # android KEYCODE_* (BACK, HOME, 82); ios: not supported in v1
+//	sim-go key <platform> <id> <code>
 //	sim-go open-url <platform> <id> <url>
 //	sim-go screenshot <platform> <id> <out.png>
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -22,26 +27,22 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/Adelodunpeter25/sim-go/internal/android"
-	"github.com/Adelodunpeter25/sim-go/internal/driver"
-	"github.com/Adelodunpeter25/sim-go/internal/ios"
+	"github.com/Adelodunpeter25/sim-go/internal/sdk"
 )
 
 const version = "0.1.0"
 
-func drivers() map[string]driver.Driver {
-	return map[string]driver.Driver{
-		"ios":     ios.Driver{},
-		"android": android.Driver{},
-	}
-}
-
 func usage() {
-	fmt.Fprintf(os.Stderr, `sim-go %s — drive iOS simulators + Android emulators (mac/linux)
+	fmt.Fprintf(os.Stderr, `sim-go %s — SDK CLI for iOS simulators + Android emulators (mac/linux)
 
 usage:
   sim-go list [-platform ios|android]
-  sim-go boot|shutdown|slim|restore <ios|android> <id>
+  sim-go doctor [-json]
+  sim-go boot|shutdown|slim|restore|normalize <ios|android> <id>
+  sim-go launch <platform> <id> <bundle|package>
+  sim-go terminate|uninstall <platform> <id> <bundle|package>
+  sim-go install <platform> <id> <app.apk|.app>
+  sim-go press <platform> <id> <button>
   sim-go tap <platform> <id> <x> <y>
   sim-go swipe <platform> <id> <x1> <y1> <x2> <y2> [ms]
   sim-go type <platform> <id> <text...>
@@ -51,7 +52,7 @@ usage:
 
 env:
   ANDROID_HOME             Android SDK location (adb/emulator discovery)
-  SIM_GO_ANDROID_RAM_MB    guest RAM for `+"`sim-go boot android`"+` (default 2048)
+  SIM_GO_ANDROID_RAM_MB    guest RAM for boot android (default 2048)
 `, version)
 }
 
@@ -62,6 +63,15 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
+	c := sdk.New()
+
+	ok := func(op string, err error) {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: error: %v\n", op, err)
+			os.Exit(1)
+		}
+		fmt.Printf("%s: ok\n", op)
+	}
 
 	switch os.Args[1] {
 	case "-h", "-help", "--help", "help":
@@ -72,36 +82,92 @@ func main() {
 		fs := flag.NewFlagSet("list", flag.ExitOnError)
 		platform := fs.String("platform", "", "ios|android (default: both)")
 		_ = fs.Parse(os.Args[2:])
-		runList(ctx, *platform)
-	case "boot", "shutdown", "slim", "restore":
-		if len(os.Args) != 4 {
-			fmt.Fprintf(os.Stderr, "usage: sim-go %s <ios|android> <id>\n", os.Args[1])
-			os.Exit(2)
+		devs, err := c.ListAll(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "list: error: %v\n", err)
+			os.Exit(1)
 		}
-		runLifecycle(ctx, os.Args[1], os.Args[2], os.Args[3])
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "PLATFORM\tID\tNAME\tSTATE\tOS")
+		for _, dev := range devs {
+			if *platform != "" && dev.Platform != *platform {
+				continue
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", dev.Platform, dev.ID, dev.Name, dev.State, dev.OS)
+		}
+		w.Flush()
+	case "doctor":
+		fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+		asJSON := fs.Bool("json", false, "machine-readable output")
+		_ = fs.Parse(os.Args[2:])
+		d := c.Doctor(ctx)
+		if *asJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(d)
+			return
+		}
+		fmt.Printf("os: %s\nxcode: %v (%s)\nsimctl: %v\nadb: %v\nemulator: %v\ndisk: %.1f GB free (enough: %v)\n%s\n",
+			d.OS, d.XcodeInstalled, d.XcodeSelectPath, d.SimctlAvailable,
+			d.ADBAvailable, d.EmulatorAvail,
+			float64(d.DiskFreeBytes)/(1<<30), d.HasEnoughDiskGB, d.Detail)
+	case "boot", "shutdown", "slim", "restore", "normalize":
+		needArgs(4, os.Args[1]+" <ios|android> <id>")
+		op, platform, id := os.Args[1], os.Args[2], os.Args[3]
+		var err error
+		switch op {
+		case "boot":
+			err = c.Boot(ctx, platform, id)
+		case "shutdown":
+			err = c.Shutdown(ctx, platform, id)
+		case "slim":
+			err = c.Slim(ctx, platform, id)
+		case "restore":
+			err = c.Restore(ctx, platform, id)
+		case "normalize":
+			err = c.Normalize(ctx, platform, id)
+		}
+		ok(op, err)
+	case "launch":
+		needArgs(5, "launch <platform> <id> <bundle|package>")
+		out, err := c.Launch(ctx, os.Args[2], os.Args[3], os.Args[4])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "launch: error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("launch: ok %s\n", out)
+	case "terminate", "uninstall":
+		needArgs(5, os.Args[1]+" <platform> <id> <bundle|package>")
+		var err error
+		if os.Args[1] == "terminate" {
+			err = c.Terminate(ctx, os.Args[2], os.Args[3], os.Args[4])
+		} else {
+			err = c.Uninstall(ctx, os.Args[2], os.Args[3], os.Args[4])
+		}
+		ok(os.Args[1], err)
+	case "install":
+		needArgs(5, "install <platform> <id> <app.apk|.app>")
+		ok("install", c.Install(ctx, os.Args[2], os.Args[3], os.Args[4]))
+	case "press":
+		needArgs(5, "press <platform> <id> <home|back|lock|power|volume-up|volume-down|menu>")
+		ok("press", c.Press(ctx, os.Args[2], os.Args[3], os.Args[4]))
 	case "tap":
-		if len(os.Args) != 6 {
-			fmt.Fprintln(os.Stderr, "usage: sim-go tap <platform> <id> <x> <y>")
-			os.Exit(2)
-		}
+		needArgs(6, "tap <platform> <id> <x> <y>")
 		x, e1 := strconv.Atoi(os.Args[4])
 		y, e2 := strconv.Atoi(os.Args[5])
 		if e1 != nil || e2 != nil {
-			fmt.Fprintln(os.Stderr, "x and y must be integers")
-			os.Exit(2)
+			die("x and y must be integers")
 		}
-		must(check(ctx, os.Args[2], os.Args[3], "tap", mustDriver(os.Args[2]).Tap(ctx, os.Args[3], x, y)))
+		ok("tap", c.Tap(ctx, os.Args[2], os.Args[3], x, y))
 	case "swipe":
 		if len(os.Args) != 8 && len(os.Args) != 9 {
-			fmt.Fprintln(os.Stderr, "usage: sim-go swipe <platform> <id> <x1> <y1> <x2> <y2> [ms]")
-			os.Exit(2)
+			die("usage: sim-go swipe <platform> <id> <x1> <y1> <x2> <y2> [ms]")
 		}
 		nums := make([]int, 4)
 		for i := 0; i < 4; i++ {
 			n, err := strconv.Atoi(os.Args[4+i])
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "coords must be integers")
-				os.Exit(2)
+				die("coords must be integers")
 			}
 			nums[i] = n
 		}
@@ -110,36 +176,25 @@ func main() {
 			var err error
 			ms, err = strconv.Atoi(os.Args[8])
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "ms must be an integer")
-				os.Exit(2)
+				die("ms must be an integer")
 			}
 		}
-		must(check(ctx, os.Args[2], os.Args[3], "swipe", mustDriver(os.Args[2]).Swipe(ctx, os.Args[3], nums[0], nums[1], nums[2], nums[3], ms)))
+		ok("swipe", c.Swipe(ctx, os.Args[2], os.Args[3], nums[0], nums[1], nums[2], nums[3], ms))
 	case "type":
 		if len(os.Args) < 5 {
-			fmt.Fprintln(os.Stderr, "usage: sim-go type <platform> <id> <text...>")
-			os.Exit(2)
+			die("usage: sim-go type <platform> <id> <text...>")
 		}
 		text := join(os.Args[4:])
-		must(check(ctx, os.Args[2], os.Args[3], "type", mustDriver(os.Args[2]).Type(ctx, os.Args[3], text)))
+		ok("type", c.Type(ctx, os.Args[2], os.Args[3], text))
 	case "key":
-		if len(os.Args) != 5 {
-			fmt.Fprintln(os.Stderr, "usage: sim-go key <platform> <id> <code>")
-			os.Exit(2)
-		}
-		must(check(ctx, os.Args[2], os.Args[3], "key", mustDriver(os.Args[2]).Key(ctx, os.Args[3], os.Args[4])))
+		needArgs(5, "key <platform> <id> <code>")
+		ok("key", c.Key(ctx, os.Args[2], os.Args[3], os.Args[4]))
 	case "open-url":
-		if len(os.Args) != 5 {
-			fmt.Fprintln(os.Stderr, "usage: sim-go open-url <platform> <id> <url>")
-			os.Exit(2)
-		}
-		must(check(ctx, os.Args[2], os.Args[3], "open-url", mustDriver(os.Args[2]).OpenURL(ctx, os.Args[3], os.Args[4])))
+		needArgs(5, "open-url <platform> <id> <url>")
+		ok("open-url", c.OpenURL(ctx, os.Args[2], os.Args[3], os.Args[4]))
 	case "screenshot":
-		if len(os.Args) != 5 {
-			fmt.Fprintln(os.Stderr, "usage: sim-go screenshot <platform> <id> <out.png>")
-			os.Exit(2)
-		}
-		must(check(ctx, os.Args[2], os.Args[3], "screenshot", mustDriver(os.Args[2]).Screenshot(ctx, os.Args[3], os.Args[4])))
+		needArgs(5, "screenshot <platform> <id> <out.png>")
+		ok("screenshot", c.Screenshot(ctx, os.Args[2], os.Args[3], os.Args[4]))
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		usage()
@@ -147,67 +202,15 @@ func main() {
 	}
 }
 
-func mustDriver(platform string) driver.Driver {
-	d, ok := drivers()[platform]
-	if !ok {
-		fmt.Fprintf(os.Stderr, "unknown platform %q (want ios|android)\n", platform)
-		os.Exit(2)
-	}
-	return d
-}
-
-// check prints a one-line ok/fail and returns exit-worthy error state.
-func check(_ context.Context, _, _ string, op string, err error) error {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: error: %v\n", op, err)
-		os.Exit(1)
-	}
-	fmt.Printf("%s: ok\n", op)
-	return nil
-}
-
-func must(err error) {
-	if err != nil {
-		os.Exit(1)
+func needArgs(n int, use string) {
+	if len(os.Args) != n {
+		die("usage: sim-go " + use)
 	}
 }
 
-func runList(ctx context.Context, only string) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "PLATFORM\tID\tNAME\tSTATE\tOS")
-	for name, d := range drivers() {
-		if only != "" && only != name {
-			continue
-		}
-		devs, err := d.List(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s list: %v\n", name, err)
-			if only == name {
-				os.Exit(1)
-			}
-			continue
-		}
-		for _, dev := range devs {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", dev.Platform, dev.ID, dev.Name, dev.State, dev.OS)
-		}
-	}
-	w.Flush()
-}
-
-func runLifecycle(ctx context.Context, op, platform, id string) {
-	d := mustDriver(platform)
-	var err error
-	switch op {
-	case "boot":
-		err = d.Boot(ctx, id)
-	case "shutdown":
-		err = d.Shutdown(ctx, id)
-	case "slim":
-		err = d.Slim(ctx, id)
-	case "restore":
-		err = d.Restore(ctx, id)
-	}
-	must(check(ctx, platform, id, op, err))
+func die(msg string) {
+	fmt.Fprintln(os.Stderr, msg)
+	os.Exit(2)
 }
 
 func join(parts []string) string {

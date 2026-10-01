@@ -26,6 +26,27 @@ type Driver interface {
 	// Restore re-enables what Slim disabled.
 	Restore(ctx context.Context, id string) error
 
+	// Launch starts an app (iOS bundle ID, Android package) and returns
+	// the process/pid line reported by the platform tool.
+	Launch(ctx context.Context, id, app string) (string, error)
+	// Terminate stops an app.
+	Terminate(ctx context.Context, id, app string) error
+	// Install sideloads an app package (.app dir for ios, .apk for android).
+	Install(ctx context.Context, id, appPath string) error
+	// Uninstall removes an app.
+	Uninstall(ctx context.Context, id, app string) error
+	// IsInstalled reports whether an app is present.
+	IsInstalled(ctx context.Context, id, app string) (bool, error)
+
+	// Press is a unified hardware/software button: home, back, lock, power,
+	// volume-up, volume-down, menu. Platforms without a mapping return an
+	// explicit unsupported error instead of guessing.
+	Press(ctx context.Context, id, button string) error
+
+	// Normalize makes screenshots deterministic: fixed status bar on iOS,
+	// zeroed animation scales on Android. Appearance and content untouched.
+	Normalize(ctx context.Context, id string) error
+
 	Tap(ctx context.Context, id string, x, y int) error
 	Swipe(ctx context.Context, id string, x1, y1, x2, y2, ms int) error
 	Type(ctx context.Context, id, text string) error

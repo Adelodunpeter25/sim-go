@@ -12,7 +12,12 @@ Importable drivers + thin CLI, stdlib only (no external deps):
 
 ```
 sim-go list [-platform ios|android]
-sim-go boot|shutdown|slim|restore <ios|android> <id>
+sim-go doctor [-json]
+sim-go boot|shutdown|slim|restore|normalize <ios|android> <id>
+sim-go launch <platform> <id> <bundle|package>
+sim-go terminate|uninstall <platform> <id> <bundle|package>
+sim-go install <platform> <id> <app.apk|.app>
+sim-go press <platform> <id> <home|back|lock|power|volume-up|volume-down|menu>
 sim-go tap <platform> <id> <x> <y>
 sim-go swipe <platform> <id> <x1> <y1> <x2> <y2> [ms]
 sim-go type <platform> <id> <text...>        # android only in v1
@@ -41,8 +46,9 @@ Env: `ANDROID_HOME`, `SIM_GO_ANDROID_RAM_MB` (default 2048).
 ## Layout
 
 ```
-cmd/sim-go/main.go        CLI (stdlib flag only)
+cmd/sim-go/main.go        CLI (thin consumer of internal/sdk)
 internal/driver/driver.go Driver interface + Device
+internal/sdk/             embeddable facade (Client, Doctor, Normalize) — the product
 internal/slim/profile.go  fixed slim sets (from simslim categories + avdslim-style list)
 internal/ios/ios.go       simctl driver (darwin only)
 internal/android/android.go adb/emulator driver (darwin+linux)
@@ -52,6 +58,12 @@ reference/simfleet        entropyconquers/simfleet clone (study only, MIT)
 
 ## v1 limits (honest)
 
-- `ios type/key`: not implemented — `simctl` has no text/key injection; simfleet solves this with baguette/argent helpers. Use `open-url` deep links for now.
+- `ios tap/swipe/press/type/key`: not supported by `simctl` on this host — `simctl io`
+  offers only enumerate/poll/recordVideo/screenshot (verified via `simctl io --help`).
+  t3code solves this with an agent-device/baguette helper (Phase 4 scope). The SDK
+  fails loudly with guidance instead of passing cryptic simctl errors. Use
+  `launch`/`open-url` for now.
+- Android paths are compile-tested only here (no `emulator` binary on this host;
+  `doctor` reports this honestly).
 - iOS slim is live-session (`disable` + `bootout`, simslim `--no-reboot` path): persists across reboots on iOS 18.5+, session-only below.
 - No server/dashboard/lanes/Metro (simfleet scope) — CLI + library only per v1 decision.

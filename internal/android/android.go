@@ -227,7 +227,76 @@ func (Driver) Restore(ctx context.Context, id string) error {
 	return nil
 }
 
-func (Driver) Tap(ctx context.Context, id string, x, y int) error {
+// Launch starts a package's launcher activity (no activity name needed).
+func (d Driver) Launch(ctx context.Context, id, pkg string) (string, error) {
+	out, err := adb(ctx, "-s", id, "shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (d Driver) Terminate(ctx context.Context, id, pkg string) error {
+	_, err := adb(ctx, "-s", id, "shell", "am", "force-stop", pkg)
+	return err
+}
+
+func (d Driver) Install(ctx context.Context, id, apkPath string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	_, err := adb(ctx, "-s", id, "install", "-r", apkPath)
+	return err
+}
+
+func (d Driver) Uninstall(ctx context.Context, id, pkg string) error {
+	_, err := adb(ctx, "-s", id, "uninstall", pkg)
+	return err
+}
+
+// IsInstalled checks `pm path`: empty output means absent.
+func (d Driver) IsInstalled(ctx context.Context, id, pkg string) (bool, error) {
+	out, err := adb(ctx, "-s", id, "shell", "pm", "path", pkg)
+	if err != nil {
+		return false, nil // device unreachable/absent package both read as not installed
+	}
+	return strings.Contains(string(out), "package:"), nil
+}
+
+// pressMap normalizes Console's interact verbs to KEYCODE_* names.
+var pressMap = map[string]string{
+	"home":        "KEYCODE_HOME",
+	"back":        "KEYCODE_BACK",
+	"lock":        "KEYCODE_POWER",
+	"power":       "KEYCODE_POWER",
+	"volume-up":   "KEYCODE_VOLUME_UP",
+	"volume-down": "KEYCODE_VOLUME_DOWN",
+	"menu":        "KEYCODE_MENU",
+}
+
+func (d Driver) Press(ctx context.Context, id, button string) error {
+	code, ok := pressMap[strings.ToLower(button)]
+	if !ok {
+		return fmt.Errorf("unknown button %q (want home|back|lock|power|volume-up|volume-down|menu)", button)
+	}
+	_, err := adb(ctx, "-s", id, "shell", "input", "keyevent", code)
+	return err
+}
+
+// Normalize zeroes animation scales so screenshots and agent waits are stable.
+func (d Driver) Normalize(ctx context.Context, id string) error {
+	for _, kv := range [][2]string{
+		{"window_animation_scale", "0"},
+		{"transition_animation_scale", "0"},
+		{"animator_duration_scale", "0"},
+	} {
+		if _, err := adb(ctx, "-s", id, "shell", "settings", "put", "global", kv[0], kv[1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d Driver) Tap(ctx context.Context, id string, x, y int) error {
 	_, err := adb(ctx, "-s", id, "shell", "input", "tap", itoa(x), itoa(y))
 	return err
 }
