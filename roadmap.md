@@ -78,6 +78,12 @@ This phase buys the near-zero latency. Only starts after Phase 3 works.
 - [x] WebCodecs-capable viewer contract (server encodes once to AVCC + avcC;
   page decodes; any client — desktop, web, iOS app — just decodes)
 - [ ] Session lifecycle: survive app backgrounding, re-keyframe on reattach, clean kill on shutdown
+- [x] iOS backend unblocked: `internal/idb` supervises pinned idb_companion
+  v1.1.8 (last Intel-capable, auto-fetched universal binary); HID tap/swipe
+  + H.264 video over gRPC proven live (`stream-probe ios`: describe
+  1170x2532/390x844, IDR, center tap, exact 3x point scale)
+- [ ] iOS serve wiring: idb sessions into `/api/stream` next to scrcpy (same
+  WS tags: meta/codec/desc/key/delta), page already platform-aware
 
 Done when: swipe on a remote viewer feels instant; an iOS client can drive an Android emulator (server owns all device truth).
 

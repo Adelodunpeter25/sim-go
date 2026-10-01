@@ -8,7 +8,8 @@ Idea sources (cloned under `reference/` for study, not vendored):
 
 ## What v1 does
 
-Importable drivers + thin CLI, stdlib only (no external deps):
+Importable drivers + thin CLI. Core is stdlib only; `internal/idb` alone
+adds grpc+protobuf (pinned companion protocol, no Python/Node at runtime):
 
 ```
 sim-go list [-platform ios|android]
@@ -66,7 +67,8 @@ go run ./cmd/sim-serve            # browser preview on :8790
 Env: `ANDROID_HOME`, `SIM_GO_ANDROID_RAM_MB` (default 4096),
 `SIM_GO_ANDROID_GPU` (`host` default, or `swiftshader_indirect` where host GL
 starves the video encoder — observed on Intel mac),
-`SIM_GO_SCRCPY_SERVER` (override pinned scrcpy-server binary path).
+`SIM_GO_SCRCPY_SERVER` (override pinned scrcpy-server binary path),
+`SIM_GO_IDB_COMPANION` (override pinned idb_companion binary path).
 
 ## Layout
 
@@ -79,17 +81,21 @@ internal/slim/profile.go  fixed slim sets (from simslim categories + avdslim-sty
 internal/ios/              simctl driver: ios.go, devices.go, apps.go, slim.go, input.go (darwin only)
 internal/android/          adb/emulator driver: android.go, discover.go, devices.go, apps.go, slim.go, input.go
 internal/scrcpy/          live Android video+input: scrcpy.go, session.go, video.go, control.go
+internal/idb/             live iOS HID+video: idb.go, session.go, hid.go, video.go,
+                          proto/ (pinned v1.1.8), gen/ (generated gRPC; the one
+                          package with external deps: grpc+protobuf)
 reference/simslim         MobAI-App/simslim clone (study only, MIT)
 reference/simfleet        entropyconquers/simfleet clone (study only, MIT) + scrcpy (Apache-2.0) protocol source
 ```
 
 ## v1 limits (honest)
 
-- `ios tap/swipe/press/type/key`: not supported by `simctl` on this host — `simctl io`
-  offers only enumerate/poll/recordVideo/screenshot (verified via `simctl io --help`).
-  t3code solves this with an agent-device/baguette helper (Phase 4 scope). The SDK
-  fails loudly with guidance instead of passing cryptic simctl errors. Use
-  `launch`/`open-url` for now.
+- `ios tap/swipe` via `simctl`: not supported — `simctl io` offers only
+  enumerate/poll/recordVideo/screenshot (verified via `simctl io --help`).
+  The path is `internal/idb` instead: supervised idb_companion v1.1.8
+  (pinned universal binary, auto-fetched) gives HID tap/swipe + H.264 video
+  over gRPC — proven live (`stream-probe ios`: describe, IDR, center tap).
+  Serve wiring (browser WS) is the remaining piece.
 - Android video needs working on-device encoding: `-gpu host` starves the
   encoder on Intel mac (screenrecord/scrcpy get zero frames); boot with
   `SIM_GO_ANDROID_GPU=swiftshader_indirect` there.

@@ -27,6 +27,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Adelodunpeter25/sim-go/internal/idb"
 	"github.com/Adelodunpeter25/sim-go/internal/scrcpy"
 	"github.com/Adelodunpeter25/sim-go/internal/sdk"
 )
@@ -223,9 +224,18 @@ func needArgs(n int, use string) {
 // (proving H.264 flows), taps screen center, and closes. Diagnostic for the
 // Phase 4 streaming work; the browser WS multiplex comes later.
 func runStreamProbe(ctx context.Context, c *sdk.Client, platform, id string) {
-	if platform != "android" {
-		die("stream-probe only supports android in v1")
+	if platform == "android" {
+		runAndroidProbe(ctx, c, id)
+		return
 	}
+	if platform == "ios" {
+		runIOSProbe(ctx, id)
+		return
+	}
+	die("stream-probe supports ios|android")
+}
+
+func runAndroidProbe(ctx context.Context, c *sdk.Client, id string) {
 	serial := id
 	if !isSerial(id) {
 		devs, err := c.ListAll(ctx)
@@ -268,6 +278,111 @@ func runStreamProbe(ctx context.Context, c *sdk.Client, platform, id string) {
 
 func isSerial(id string) bool {
 	return len(id) > 9 && id[:9] == "emulator-"
+}
+
+// runIOSProbe opens an idb companion session, waits for an IDR frame
+// (proving H.264 flows), and taps center in HID points.
+func runIOSProbe(ctx context.Context, udid string) {
+	sess, err := idb.Start(ctx, udid)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stream-probe: start: %v\n", err)
+		os.Exit(1)
+	}
+	defer sess.Close()
+	dims := sess.Desc.GetTargetDescription().GetScreenDimensions()
+	fmt.Printf("stream: %s %dx%d px (%dx%d pt)\n",
+		sess.Desc.GetTargetDescription().GetName(),
+		dims.GetWidth(), dims.GetHeight(), dims.GetWidthPoints(), dims.GetHeightPoints())
+	vs, err := sess.StartVideo(30, 1)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stream-probe: video: %v\n", err)
+		os.Exit(1)
+	}
+	defer vs.Stop()
+	nals, err := waitIDR(vs, 30*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stream-probe: keyframe: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("idr: SPS+PPS+IDR seen (%d NALs reassembled)\n", nals)
+	sx, sy := sess.Points()
+	fmt.Printf("hid scale: %.2f x %.2f px/pt\n", sx, sy)
+	cx, cy := float64(dims.GetWidthPoints())/2, float64(dims.GetHeightPoints())/2
+	if err := sess.Tap(ctx, cx, cy); err != nil {
+		fmt.Fprintf(os.Stderr, "stream-probe: tap: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("tap: ok (%.0f,%.0f pt)\n", cx, cy)
+}
+
+// waitIDR accumulates Annex-B payloads until SPS + IDR NALs have been seen.
+func waitIDR(vs *idb.VideoStream, timeout time.Duration) (int, error) {
+	var buf []byte
+	sawSPS, sawIDR, nals := false, false, 0
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		select {
+		case chunk, ok := <-vs.Frames:
+			if !ok {
+				return 0, fmt.Errorf("video pipe closed")
+			}
+			buf = append(buf, chunk...)
+			for _, nal := range splitAnnexB(buf) {
+				if len(nal) == 0 {
+					continue
+				}
+				nals++
+				switch nal[0] & 0x1f {
+				case 7:
+					sawSPS = true
+				case 5:
+					if sawSPS {
+						sawIDR = true
+					}
+				}
+			}
+			// Keep only the tail: NALs may split across chunks.
+			if len(buf) > 1<<20 {
+				buf = buf[len(buf)-(1<<20):]
+			}
+			if sawIDR {
+				return nals, nil
+			}
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return 0, fmt.Errorf("no IDR within %s", timeout)
+}
+
+// splitAnnexB is a local Annex-B splitter (idb payloads, same packing as scrcpy).
+func splitAnnexB(b []byte) [][]byte {
+	var nals [][]byte
+	start := -1
+	emit := func(end int) {
+		if start >= 0 && end > start {
+			nals = append(nals, b[start:end])
+		}
+	}
+	i := 0
+	for i < len(b) {
+		if i+2 < len(b) && b[i] == 0 && b[i+1] == 0 {
+			if b[i+2] == 1 {
+				emit(i)
+				i += 3
+				start = i
+				continue
+			}
+			if i+3 < len(b) && b[i+2] == 0 && b[i+3] == 1 {
+				emit(i)
+				i += 4
+				start = i
+				continue
+			}
+		}
+		i++
+	}
+	emit(len(b))
+	return nals
 }
 
 func die(msg string) {
