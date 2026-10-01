@@ -40,12 +40,13 @@ Smallest missing blocks. Each is one SDK method + CLI verb + real-device test.
 
 Done when: an agent can boot → install → launch → screenshot → terminate purely through SDK calls, tested on the iPhone 16e sim.
 
-## Phase 2 — Embeddable service (console's missing backend)
+## Phase 2 — Embeddable service (our own API)
 
-Turn the SDK into the service console's `device.rs` already expects.
+Turn the SDK into the long-lived service a host app embeds. We define our own
+Go API — console adapts to us, not the other way around.
 
-- [ ] `service` package: `List/Boot/Shutdown/ShutdownAll/OpenApp/Interact/Screenshot` matching console's `DeviceService` routes 1:1
-- [ ] `DeviceDescriptor{ID, Name, Platform, State, Model, OSVersion, Available}` JSON (console `types/device.rs` shape)
+- [ ] `service` package: own `List/Boot/Shutdown/ShutdownAll/OpenApp/Interact/Screenshot` API with Go-native types
+- [ ] `DeviceDescriptor{ID, Name, Platform, State, Model, OSVersion, Available}` JSON shaped for our needs
 - [ ] State events: snapshot-first, then changes (t3code `DeviceService:1168` WS-subscriber pattern; transport-agnostic channel first, WS later)
 - [ ] Boot-ID remap: Android AVD name → `emulator-XXXX` after boot; iOS attach-after-boot hook (stream session binds post-`bootstatus`, never assumes boot == ready)
 - [ ] Host abstraction: `Local` first; `SSH` shape reserved (t3code `SshDeviceHost` pattern, loopback-forwarded)
