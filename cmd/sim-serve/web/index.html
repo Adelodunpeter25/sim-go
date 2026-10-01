@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sim-go preview</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; max-width: 1100px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  #doctor { color: #666; font-size: 13px; margin-bottom: 16px; }
+  .layout { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  #devices { min-width: 280px; flex: 1; }
+  #panel { flex: 2; min-width: 320px; }
+  .dev { border: 1px solid #ccc; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+  .dev.sel { border-color: #06c; background: rgba(0,102,204,.06); }
+  .dev .st { font-size: 12px; color: #666; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  button { padding: 6px 10px; border-radius: 6px; border: 1px solid #bbb; background: #f5f5f5; cursor: pointer; }
+  button:hover { background: #e8e8e8; }
+  input[type=text] { padding: 6px 8px; border-radius: 6px; border: 1px solid #bbb; }
+  #shot { max-width: 100%; max-height: 70vh; border: 1px solid #ccc; border-radius: 8px; touch-action: none; cursor: crosshair; background: #111; }
+  #err { color: #b00; min-height: 1.4em; font-size: 13px; white-space: pre-wrap; }
+  #okline { color: #0a0; min-height: 1.4em; font-size: 13px; }
+  fieldset { border: 1px solid #ccc; border-radius: 8px; margin: 8px 0; }
+  legend { font-size: 12px; color: #666; padding: 0 6px; }
+  label { font-size: 12px; color: #666; }
+</style>
+</head>
+<body>
+<h1>sim-go preview</h1>
+<div id="doctor">…</div>
+<div class="layout">
+  <div id="devices">
+    <div class="row"><button id="refresh">Refresh devices</button></div>
+    <div id="list"></div>
+  </div>
+  <div id="panel">
+    <div id="sel">Select a device.</div>
+    <div id="err"></div>
+    <div id="okline"></div>
+    <div id="ctl" hidden>
+      <div class="row">
+        <button data-op="boot">Boot</button>
+        <button data-op="shutdown">Shutdown</button>
+        <button data-op="slim">Slim</button>
+        <button data-op="restore">Restore</button>
+        <button data-op="normalize">Normalize</button>
+      </div>
+      <div><img id="shot" alt="device screen"></div>
+      <div class="row">
+        <label><input type="checkbox" id="live" checked> live (1s)</label>
+        <button id="snap">Screenshot now</button>
+      </div>
+      <fieldset><legend>Apps</legend>
+        <div class="row">
+          <input type="text" id="app" placeholder="bundle id / package" size="28">
+          <button id="launch">Launch</button>
+          <button id="term">Terminate</button>
+        </div>
+      </fieldset>
+      <fieldset><legend>Input (android; ios fails honestly — no simctl input ops)</legend>
+        <div class="row">
+          <input type="text" id="typetext" placeholder="text to type" size="20">
+          <button id="type">Type</button>
+          <input type="text" id="keycode" placeholder="key: back" size="10">
+          <button id="key">Key</button>
+          <input type="text" id="pressbtn" placeholder="button: home" size="12">
+          <button id="press">Press</button>
+        </div>
+        <div class="row">
+          <input type="text" id="url" placeholder="https://… or deep link" size="34">
+          <button id="openurl">Open URL</button>
+        </div>
+      </fieldset>
+    </div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const errBox = $('err'), okBox = $('okline');
+let sel = null, liveTimer = null, drag = null;
+
+function err(m) { errBox.textContent = m; okBox.textContent = ''; }
+function ok(m) { okBox.textContent = m; errBox.textContent = ''; }
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  if (path.endsWith('/screenshot')) return r;
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'failed');
+  return j;
+}
+async function loadDoctor() {
+  try { const d = await (await fetch('/api/doctor')).json(); $('doctor').textContent = d.detail || JSON.stringify(d); }
+  catch (e) { $('doctor').textContent = 'doctor failed: ' + e.message; }
+}
+async function loadDevices() {
+  const list = $('list'); list.innerHTML = '';
+  let devs;
+  try { devs = await (await fetch('/api/devices')).json(); }
+  catch (e) { err('list failed: ' + e.message); return; }
+  if (!devs.length) { list.textContent = 'No devices.'; return; }
+  for (const d of devs) {
+    const el = document.createElement('div');
+    el.className = 'dev' + (sel && sel.id === d.id ? ' sel' : '');
+    el.innerHTML = '<b></b> <span class="st"></span>';
+    el.querySelector('b').textContent = d.platform + ' · ' + d.name;
+    el.querySelector('.st').textContent = d.id + ' · ' + d.state + (d.os ? ' · ' + d.os : '');
+    el.onclick = () => select(d);
+    list.appendChild(el);
+  }
+}
+function select(d) {
+  sel = d;
+  $('sel').textContent = d.platform + ' · ' + d.name + ' (' + d.state + ')';
+  $('ctl').hidden = false;
+  loadDevices(); snap();
+  restartLive();
+}
+function restartLive() {
+  clearInterval(liveTimer);
+  if ($('live').checked) liveTimer = setInterval(() => { if (sel) snap(true); }, 1000);
+}
+$('live').onchange = restartLive;
+async function snap(quiet) {
+  if (!sel) return;
+  try {
+    const r = await fetch('/api/screenshot?platform=' + encodeURIComponent(sel.platform) + '&id=' + encodeURIComponent(sel.id));
+    if (!r.ok) { const j = await r.json(); throw new Error(j.error || r.statusText); }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const img = $('shot');
+    if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+    img.src = url;
+    if (!quiet) ok('screenshot ok');
+  } catch (e) { if (!quiet) err('screenshot: ' + e.message); }
+}
+$('snap').onclick = () => snap();
+$('refresh').onclick = loadDevices;
+document.querySelectorAll('#ctl button[data-op]').forEach(b => {
+  b.onclick = async () => {
+    if (!sel) return;
+    try { await api('/api/' + b.dataset.op, { platform: sel.platform, id: sel.id }); ok(b.dataset.op + ': ok'); loadDevices(); }
+    catch (e) { err(b.dataset.op + ': ' + e.message); }
+  };
+});
+async function appOp(path) {
+  const app = $('app').value.trim();
+  if (!sel || !app) return;
+  try { const j = await api(path, { platform: sel.platform, id: sel.id, app }); ok('ok' + (j.output ? ' ' + j.output : '')); }
+  catch (e) { err(e.message); }
+}
+$('launch').onclick = () => appOp('/api/launch');
+$('term').onclick = () => appOp('/api/terminate');
+$('type').onclick = async () => {
+  if (!sel) return;
+  try { await api('/api/type', { platform: sel.platform, id: sel.id, text: $('typetext').value }); ok('type: ok'); }
+  catch (e) { err('type: ' + e.message); }
+};
+$('key').onclick = async () => {
+  if (!sel) return;
+  try { await api('/api/key', { platform: sel.platform, id: sel.id, code: $('keycode').value.trim() || 'back' }); ok('key: ok'); }
+  catch (e) { err('key: ' + e.message); }
+};
+$('press').onclick = async () => {
+  if (!sel) return;
+  try { await api('/api/press', { platform: sel.platform, id: sel.id, button: $('pressbtn').value.trim() || 'home' }); ok('press: ok'); }
+  catch (e) { err('press: ' + e.message); }
+};
+$('openurl').onclick = async () => {
+  if (!sel || !$('url').value.trim()) return;
+  try { await api('/api/open-url', { platform: sel.platform, id: sel.id, url: $('url').value.trim() }); ok('open-url: ok'); }
+  catch (e) { err('open-url: ' + e.message); }
+};
+// Click = tap, drag = swipe. Coordinates scale from displayed size to pixels:
+// for android the server maps device pixels via the stream size; here we send
+// raw pixels using the image's natural size.
+const img = $('shot');
+function pos(e) {
+  const r = img.getBoundingClientRect();
+  const sx = img.naturalWidth / r.width, sy = img.naturalHeight / r.height;
+  return { x: Math.round((e.clientX - r.left) * sx), y: Math.round((e.clientY - r.top) * sy) };
+}
+img.addEventListener('pointerdown', e => { if (!sel) return; img.setPointerCapture(e.pointerId); drag = { p: pos(e), moved: false }; });
+img.addEventListener('pointermove', e => { if (drag) drag.moved = true; });
+img.addEventListener('pointerup', async e => {
+  if (!sel || !drag) return;
+  const q = pos(e), p = drag.p; drag = null;
+  try {
+    const dist = Math.hypot(q.x - p.x, q.y - p.y);
+    if (dist < 10) await api('/api/tap', { platform: sel.platform, id: sel.id, x: q.x, y: q.y });
+    else await api('/api/swipe', { platform: sel.platform, id: sel.id, x1: p.x, y1: p.y, x2: q.x, y2: q.y, ms: 300 });
+    ok('input: ok');
+  } catch (e2) { err('input: ' + e2.message); }
+});
+loadDoctor(); loadDevices();
+</script>
+</body>
+</html>

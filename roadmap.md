@@ -45,7 +45,9 @@ Done when: an agent can boot → install → launch → screenshot → terminate
 Turn the SDK into the long-lived service a host app embeds. We define our own
 Go API — console adapts to us, not the other way around.
 
-- [ ] `service` package: own `List/Boot/Shutdown/ShutdownAll/OpenApp/Interact/Screenshot` API with Go-native types
+- [x] `service` package: own `List/Boot/Shutdown/ShutdownAll/OpenApp/Interact/Screenshot` API with Go-native types
+  (shipped as `cmd/sim-serve` HTTP skin first: devices/doctor/lifecycle/
+  interact/screenshot endpoints, loopback-only, proven via boot→tap→launch→screenshot over HTTP)
 - [ ] `DeviceDescriptor{ID, Name, Platform, State, Model, OSVersion, Available}` JSON shaped for our needs
 - [ ] State events: snapshot-first, then changes (t3code `DeviceService:1168` WS-subscriber pattern; transport-agnostic channel first, WS later)
 - [ ] Boot-ID remap: Android AVD name → `emulator-XXXX` after boot; iOS attach-after-boot hook (stream session binds post-`bootstatus`, never assumes boot == ready)
@@ -57,10 +59,10 @@ Done when: console `server-go` imports the service package and its existing `dev
 
 Prove the server-owns-truth shape with cheap frames before touching video.
 
-- [ ] `Screenshot --watch` (1s poll: `simctl io screenshot` / `adb exec-out screencap`)
-- [ ] MJPEG endpoint per device (seed frame + multipart stream)
-- [ ] Input over the same channel: normalized 0..1 coords in, server translates to driver verbs
-- [ ] Security: loopback-only, allowlisted routes (t3code `DeviceHubProxy` lesson: never a generic exec route)
+- [x] `Screenshot --watch` (page polls `GET /api/screenshot` at 1s)
+- [ ] MJPEG endpoint per device (screenshot polling is enough for now)
+- [x] Input over HTTP: click=tap, drag=swipe, type/key/press/open-url forms (coords scaled via natural image size)
+- [x] Security: loopback-only, no generic exec route (fixed verb endpoints only)
 
 Done when: a browser page shows a live sim and taps land via normalized coords.
 

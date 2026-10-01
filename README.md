@@ -37,13 +37,27 @@ sim-go screenshot <platform> <id> <out.png>
   - iOS: ~130 `launchd` labels (search, iCloud, Siri, widgets, telemetry, photos-analysis, family, health, news/weather/maps, messaging). Keeps push (`apsd`), StoreKit, universal-links (`swcd`), `sharingd` running.
   - Android: ~40 bloat packages via `pm disable-user` (maps/photos/assistant/chrome/wellbeing/...). `restore` re-enables.
 
+## Preview in a browser
+
+`cmd/sim-serve` is a thin HTTP skin over the SDK (stdlib only, embedded
+single HTML file, no build step):
+
+```
+go run ./cmd/sim-serve            # http://127.0.0.1:8790
+```
+
+Device list, boot/shutdown/slim/normalize buttons, live screenshot view
+(click = tap, drag = swipe), app launch/terminate, type/key/press/open-url.
+Loopback only, no auth. Proven end-to-end: boot → tap → press → launch
+Settings → screenshot, all over HTTP.
+
 ## Build / run
 
 ```
 go build ./...
 go vet ./...
 go run ./cmd/sim-go list
-go run ./cmd/sim-go list -platform android
+go run ./cmd/sim-serve            # browser preview on :8790
 ```
 
 Env: `ANDROID_HOME`, `SIM_GO_ANDROID_RAM_MB` (default 4096),
@@ -55,6 +69,7 @@ starves the video encoder — observed on Intel mac),
 
 ```
 cmd/sim-go/main.go        CLI (thin consumer of internal/sdk)
+cmd/sim-serve/              browser preview (HTTP skin + embedded page)
 internal/driver/driver.go Driver interface + Device
 internal/sdk/             embeddable facade (Client, Doctor, Normalize) — the product
 internal/slim/profile.go  fixed slim sets (from simslim categories + avdslim-style list)
