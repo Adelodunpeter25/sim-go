@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Adelodunpeter25/sim-go/internal/sdk"
+	"github.com/Adelodunpeter25/sim-go/sdk"
 )
 
 // TestAndroidStreamLive drives the real /api/stream websocket against a

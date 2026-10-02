@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Adelodunpeter25/sim-go/internal/sdk"
+	"github.com/Adelodunpeter25/sim-go/sdk"
 )
 
 // wsClient is a minimal client for the stream contract, so the live tests can

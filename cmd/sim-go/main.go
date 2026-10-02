@@ -1,6 +1,6 @@
 // Command sim-go drives iOS simulators and Android emulators.
 //
-// Thin consumer of internal/sdk (the embeddable product). Usage:
+// Thin consumer of sdk (the embeddable product). Usage:
 //
 //	sim-go list [-platform ios|android]
 //	sim-go doctor
@@ -29,7 +29,7 @@ import (
 
 	"github.com/Adelodunpeter25/sim-go/internal/idb"
 	"github.com/Adelodunpeter25/sim-go/internal/scrcpy"
-	"github.com/Adelodunpeter25/sim-go/internal/sdk"
+	"github.com/Adelodunpeter25/sim-go/sdk"
 )
 
 const version = "0.1.0"

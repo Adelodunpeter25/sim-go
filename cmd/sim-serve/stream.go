@@ -16,7 +16,7 @@ import (
 
 	"github.com/Adelodunpeter25/sim-go/internal/idb"
 	"github.com/Adelodunpeter25/sim-go/internal/scrcpy"
-	"github.com/Adelodunpeter25/sim-go/internal/sdk"
+	"github.com/Adelodunpeter25/sim-go/sdk"
 )
 
 // Wire tags mirror simfleet/t3code: 1 description (avcC), 2 keyframe, 3 delta.

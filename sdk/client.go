@@ -16,21 +16,27 @@ import (
 	"github.com/Adelodunpeter25/sim-go/internal/ios"
 )
 
+// Device is one emulator/simulator, normalized across platforms.
+type Device = driver.Device
+
+// Driver talks to one platform's toolchain.
+type Driver = driver.Driver
+
 // Client owns one driver per platform.
 type Client struct {
-	drivers map[string]driver.Driver
+	drivers map[string]Driver
 }
 
 // New builds a Client with the built-in drivers.
 func New() *Client {
-	return &Client{drivers: map[string]driver.Driver{
+	return &Client{drivers: map[string]Driver{
 		"ios":     ios.Driver{},
 		"android": android.Driver{},
 	}}
 }
 
 // Driver resolves a platform name or returns a descriptive error.
-func (c *Client) Driver(platform string) (driver.Driver, error) {
+func (c *Client) Driver(platform string) (Driver, error) {
 	d, ok := c.drivers[platform]
 	if !ok {
 		return nil, fmt.Errorf("unknown platform %q (want ios|android)", platform)
@@ -39,8 +45,8 @@ func (c *Client) Driver(platform string) (driver.Driver, error) {
 }
 
 // ListAll returns every device on every platform, sorted for stable output.
-func (c *Client) ListAll(ctx context.Context) ([]driver.Device, error) {
-	var all []driver.Device
+func (c *Client) ListAll(ctx context.Context) ([]Device, error) {
+	var all []Device
 	var errs []error
 	for _, d := range c.drivers {
 		devs, err := d.List(ctx)

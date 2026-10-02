@@ -1,6 +1,6 @@
 // Command sim-serve previews sim-go's SDK in a browser.
 //
-// Thin HTTP skin over internal/sdk (the product). Live H.264 for android via
+// Thin HTTP skin over sdk (the product). Live H.264 for android via
 // scrcpy sessions over websocket; no screenshots anywhere on the browser
 // path. Single embedded page, no build step, no dependencies.
 //
@@ -23,7 +23,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/Adelodunpeter25/sim-go/internal/sdk"
+	"github.com/Adelodunpeter25/sim-go/sdk"
 )
 
 //go:embed web/index.html

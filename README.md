@@ -78,11 +78,11 @@ starves the video encoder — observed on Intel mac),
 ## Layout
 
 ```
-cmd/sim-go/main.go        CLI (thin consumer of internal/sdk)
+cmd/sim-go/main.go        CLI (thin consumer of sdk)
 cmd/sim-serve/              browser preview (HTTP skin + embedded page);
                           stream.go hub, ios.go iOS backend + NAL assembler
 internal/driver/driver.go Driver interface + Device
-internal/sdk/             embeddable facade (Client, Doctor, Normalize) — the product
+sdk/                      embeddable facade (Client, Doctor, Normalize) — the product
 internal/slim/profile.go  fixed slim sets (from simslim categories + avdslim-style list)
 internal/ios/              simctl driver: ios.go, devices.go, apps.go, slim.go, input.go (darwin only)
 internal/android/          adb/emulator driver: android.go, discover.go, devices.go, apps.go, slim.go, input.go

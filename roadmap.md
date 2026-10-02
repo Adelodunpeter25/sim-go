@@ -8,7 +8,7 @@ real devices, then exposes it on the CLI.
 Import shape (console side):
 
 ```go
-import simgo "github.com/Adelodunpeter25/sim-go"
+import simgo "github.com/Adelodunpeter25/sim-go/sdk"
 ```
 
 Core rules for every phase:
