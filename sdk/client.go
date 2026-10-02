@@ -26,20 +26,24 @@ type Driver = driver.Driver
 // Client owns one driver per platform.
 type Client struct {
 	drivers map[string]Driver
+	hub     *streamHub
 }
 
 // New builds a Client with the built-in drivers.
 func New() *Client {
-	return &Client{drivers: map[string]Driver{
+	c := &Client{drivers: map[string]Driver{
 		"ios":     ios.Driver{},
 		"android": android.Driver{},
 	}}
+	c.hub = newStreamHub(c.ListAll)
+	return c
 }
 
 // Close tears down pooled helper processes (idb companions). One-shot
 // callers must defer it: macOS has no parent-death signal, so an unclosed
 // companion would outlive the process.
 func (c *Client) Close() error {
+	c.hub.closeAll()
 	idb.CloseAll()
 	return nil
 }
