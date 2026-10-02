@@ -73,6 +73,7 @@ type iosAssembler struct {
 	buf     []byte   // bytes of an unterminated NAL
 	open    bool     // buf holds the start of a NAL
 	pending [][]byte // non-VCL NALs (SPS/PPS/AUD/SEI) waiting for the next picture
+	cur     *iosAU   // picture still collecting slices
 	sps     []byte
 	pps     []byte
 	sentSPS []byte // params already turned into a broadcast avcC
@@ -112,20 +113,34 @@ func (a *iosAssembler) push(chunk []byte) (aus []iosAU, desc []byte, codec strin
 		}
 		switch typ := nal[0] & 0x1f; {
 		case typ == 7: // SPS
+			a.emitCur(&aus)
 			a.sps = append([]byte(nil), nal...)
 			a.pending = append(a.pending, nal)
 		case typ == 8: // PPS
+			a.emitCur(&aus)
 			a.pps = append([]byte(nil), nal...)
 			a.pending = append(a.pending, nal)
-		case typ == 1 || typ == 5: // VCL: a picture is complete
-			picture := make([][]byte, 0, len(a.pending)+1)
-			picture = append(picture, a.pending...)
-			picture = append(picture, nal)
-			a.pending = a.pending[:0]
-			aus = append(aus, iosAU{nals: picture, key: typ == 5})
+		case typ == 1 || typ == 5: // VCL slice
+			if startsPicture(nal) || a.cur == nil {
+				a.emitCur(&aus)
+				picture := make([][]byte, 0, len(a.pending)+1)
+				picture = append(picture, a.pending...)
+				a.pending = a.pending[:0]
+				a.cur = &iosAU{nals: append(picture, nal), key: typ == 5}
+			} else {
+				// Later slice of the same picture: WebCodecs wants one
+				// chunk per picture, not per slice.
+				a.cur.nals = append(a.cur.nals, nal)
+			}
 		default: // AUD, SEI, filler: attach to the next picture
+			a.emitCur(&aus)
 			a.pending = append(a.pending, nal)
 		}
+	}
+	// The open NAL's first bytes already say whether it starts a new
+	// picture; deciding now avoids holding the current one a frame longer.
+	if a.cur != nil && nalStart >= 0 && len(b)-nalStart >= 2 && startsPicture(b[nalStart:]) {
+		a.emitCur(&aus)
 	}
 	desc, codec = a.description()
 	if len(a.pending) > 32 { // paranoia: no VCL for a long time
@@ -165,9 +180,32 @@ func startCodeLen(b []byte, i int) (int, bool) {
 // complete because no more bytes follow. Only correct at end of stream.
 func (a *iosAssembler) flush() (aus []iosAU, desc []byte, codec string) {
 	if !a.open || len(a.buf) == 0 {
-		return nil, nil, ""
+		a.emitCur(&aus)
+		return aus, nil, ""
 	}
-	return a.push(scTerminator)
+	aus, desc, codec = a.push(scTerminator)
+	a.emitCur(&aus)
+	return aus, desc, codec
+}
+
+// emitCur hands the picture under construction to the output.
+func (a *iosAssembler) emitCur(aus *[]iosAU) {
+	if a.cur != nil {
+		*aus = append(*aus, *a.cur)
+		a.cur = nil
+	}
+}
+
+// startsPicture reports whether a NAL (header first) begins a new picture:
+// any non-VCL NAL, or a slice with first_mb_in_slice == 0 (ue(v) "1" bit).
+func startsPicture(nal []byte) bool {
+	if len(nal) < 2 {
+		return true
+	}
+	if typ := nal[0] & 0x1f; typ != 1 && typ != 5 {
+		return true
+	}
+	return nal[1]&0x80 != 0
 }
 
 // description rebuilds the avcC box when the parameter sets changed; nil

@@ -18,8 +18,8 @@ func sc(nals ...[]byte) []byte {
 var (
 	spsNAL = []byte{0x67, 0x42, 0xE0, 0x1E, 0xAB, 0xCD, 0xEF} // avc1.42E01E
 	ppsNAL = []byte{0x68, 0xCE, 0x38, 0x80}
-	idrNAL = append([]byte{0x65}, filler(200)...)
-	slNAL  = append([]byte{0x41}, filler(80)...)
+	idrNAL = append([]byte{0x65, 0x88}, filler(200)...) // first_mb_in_slice == 0
+	slNAL  = append([]byte{0x41, 0x9A}, filler(80)...)
 	seiNAL = []byte{0x06, 0x05, 0x01, 0x02, 0x03, 0x04, 0x80}
 )
 
@@ -193,5 +193,26 @@ func TestAssemblerEmptyInput(t *testing.T) {
 	tail, _, _ := a.flush()
 	if len(tail) != 0 {
 		t.Fatalf("flush on an empty assembler emitted %d pictures", len(tail))
+	}
+}
+
+func TestAssemblerGroupsSlicesIntoOnePicture(t *testing.T) {
+	a := &iosAssembler{}
+	slice2 := append([]byte{0x41, 0x40}, filler(60)...) // first_mb_in_slice > 0
+	slice3 := append([]byte{0x41, 0x20}, filler(60)...)
+	var aus []iosAU
+	for _, chunk := range [][]byte{sc(spsNAL, ppsNAL, idrNAL), sc(slNAL, slice2, slice3), sc(slNAL)} {
+		got, _, _ := a.push(chunk)
+		aus = append(aus, got...)
+	}
+	if len(aus) != 2 {
+		t.Fatalf("want 2 pictures, got %d", len(aus))
+	}
+	if n := len(aus[1].nals); n != 3 || aus[1].key {
+		t.Fatalf("multi-slice picture: %d NALs key=%v, want 3 delta", n, aus[1].key)
+	}
+	tail, _, _ := a.flush()
+	if len(tail) != 1 {
+		t.Fatalf("flush: want 1 picture, got %d", len(tail))
 	}
 }
