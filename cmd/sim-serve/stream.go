@@ -82,6 +82,7 @@ type streamSession struct {
 
 	sc      *scrcpy.Session
 	ib      *idb.Session
+	ibLease *idb.Lease
 	touch   iosTouch
 	restart chan struct{} // buffered(1): reopen the iOS video pipe
 
@@ -221,10 +222,11 @@ func (h *streamHub) sessionFor(platform, id string) (*streamSession, error) {
 		}
 		ss.width, ss.height, ss.name = ss.sc.Meta.Width, ss.sc.Meta.Height, ss.sc.Meta.Name
 	case "ios":
-		ss.ib, err = idb.Start(context.Background(), id)
+		ss.ibLease, err = idb.DefaultPool.Acquire(context.Background(), id)
 		if err != nil {
 			return nil, err
 		}
+		ss.ib = ss.ibLease.Session
 		dims := ss.ib.Desc.GetTargetDescription().GetScreenDimensions()
 		ss.width, ss.height = int(dims.GetWidth()), int(dims.GetHeight())
 		ss.name = ss.ib.Desc.GetTargetDescription().GetName()
@@ -246,8 +248,8 @@ func (ss *streamSession) closeBackend() {
 	if ss.sc != nil {
 		ss.sc.Close()
 	}
-	if ss.ib != nil {
-		ss.ib.Close()
+	if ss.ibLease != nil {
+		ss.ibLease.Release() // pooled: the companion outlives us until idle
 	}
 }
 
