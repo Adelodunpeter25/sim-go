@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Adelodunpeter25/sim-go/internal/idb"
 	"github.com/Adelodunpeter25/sim-go/internal/scrcpy"
 )
 
@@ -343,21 +342,11 @@ func (ss *streamSession) handleIOS(vm viewerMsg) {
 	}
 }
 
-// iosKey maps the viewer's Android-style keycodes onto iOS equivalents: the
-// HID keyboard for typing keys, the home button for HOME. Anything else is
-// a no-op rather than an error, like the Android path's unknown codes.
+// iosKey maps the viewer's Android-style keycodes onto iOS equivalents.
+// Unknown codes are a no-op rather than an error, like the Android path.
 func (ss *streamSession) iosKey(ctx context.Context, code int) error {
-	switch code {
-	case 3: // android HOME
-		return ss.ib.Button(ctx, "HOME")
-	case 4: // page sends this for Escape
-		return ss.ib.SendEvents(ctx, idb.KeyEvents(idb.HIDKeyEscape)...)
-	case 66: // android ENTER
-		return ss.ib.SendEvents(ctx, idb.KeyEvents(idb.HIDKeyReturn)...)
-	case 67: // android DEL
-		return ss.ib.SendEvents(ctx, idb.KeyEvents(idb.HIDKeyBackspace)...)
-	}
-	return nil
+	_, err := ss.ib.AndroidKey(ctx, code)
+	return err
 }
 
 // iosDo runs one HID action under a bounded context. A rejected gesture must
