@@ -12,19 +12,20 @@ import (
 
 // pressMap normalizes Console's interact verbs to KEYCODE_* names.
 var pressMap = map[string]string{
-	"home":        "KEYCODE_HOME",
-	"back":        "KEYCODE_BACK",
-	"lock":        "KEYCODE_POWER",
-	"power":       "KEYCODE_POWER",
-	"volume-up":   "KEYCODE_VOLUME_UP",
-	"volume-down": "KEYCODE_VOLUME_DOWN",
-	"menu":        "KEYCODE_MENU",
+	"home":         "KEYCODE_HOME",
+	"back":         "KEYCODE_BACK",
+	"lock":         "KEYCODE_POWER",
+	"power":        "KEYCODE_POWER",
+	"volume-up":    "KEYCODE_VOLUME_UP",
+	"volume-down":  "KEYCODE_VOLUME_DOWN",
+	"menu":         "KEYCODE_MENU",
+	"app-switcher": "KEYCODE_APP_SWITCH",
 }
 
 func (d Driver) Press(ctx context.Context, id, button string) error {
 	code, ok := pressMap[strings.ToLower(button)]
 	if !ok {
-		return fmt.Errorf("unknown button %q (want home|back|lock|power|volume-up|volume-down|menu)", button)
+		return fmt.Errorf("unknown button %q (want home|back|lock|power|volume-up|volume-down|menu|app-switcher)", button)
 	}
 	_, err := adb(ctx, "-s", id, "shell", "input", "keyevent", code)
 	return err

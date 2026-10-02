@@ -10,7 +10,7 @@ import (
 
 // buttonKeycodes maps viewer button names to Android keycodes.
 var buttonKeycodes = map[string]int{
-	"home": 3, "back": 4, "menu": 82, "power": 26,
+	"home": 3, "back": 4, "menu": 82, "power": 26, "app-switcher": 187,
 	"volume-up": 24, "volume-down": 25,
 }
 

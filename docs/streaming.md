@@ -126,8 +126,8 @@ Two directions, two shapes.
 - Text: `type` `"text"`, `text` the string (truncated server-side at
   300 bytes).
 - Button: `type` `"button"`, `button` one of `home`, `back`, `menu`,
-  `power`, `volume-up`, `volume-down` (convenience over raw keycodes). On
-  iOS `home`, `power`/`lock`, `side` and `siri` act; `back`, `menu` and
+  `power`, `volume-up`, `volume-down`, `app-switcher` (Android; convenience over raw keycodes). On
+  iOS `home`, `power`/`lock`, `side` and `siri` act; `back`, `menu`, `app-switcher` and
   volume buttons are ignored.
 - Reset: `type` `"reset"`, asks the encoder for a fresh description plus
   key frame (what late joiners trigger automatically).

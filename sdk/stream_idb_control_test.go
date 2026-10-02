@@ -96,7 +96,7 @@ func TestIOSKeyMapTargetsExistingButtons(t *testing.T) {
 			t.Fatalf("%q maps to unknown button %q", name, hw)
 		}
 	}
-	for _, name := range []string{"back", "menu", "volume-up", "volume-down", "nonsense"} {
+	for _, name := range []string{"back", "menu", "app-switcher", "volume-up", "volume-down", "nonsense"} {
 		if _, ok := iosButtons[name]; ok {
 			t.Fatalf("%q should not map to an iOS button", name)
 		}

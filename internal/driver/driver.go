@@ -39,7 +39,7 @@ type Driver interface {
 	IsInstalled(ctx context.Context, id, app string) (bool, error)
 
 	// Press is a unified hardware/software button: home, back, lock, power,
-	// volume-up, volume-down, menu. Platforms without a mapping return an
+	// volume-up, volume-down, menu, app-switcher (Android only). Platforms without a mapping return an
 	// explicit unsupported error instead of guessing.
 	Press(ctx context.Context, id, button string) error
 

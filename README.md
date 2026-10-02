@@ -19,7 +19,7 @@ sim-go boot|shutdown|slim|restore|normalize <ios|android> <id>
 sim-go launch <platform> <id> <bundle|package>
 sim-go terminate|uninstall <platform> <id> <bundle|package>
 sim-go install <platform> <id> <app.apk|.app>
-sim-go press <platform> <id> <home|back|lock|power|volume-up|volume-down|menu>   # iOS: home, lock, power, side, siri
+sim-go press <platform> <id> <home|back|lock|power|volume-up|volume-down|menu|app-switcher>   # iOS: home, lock, power, side, siri
 sim-go tap <platform> <id> <x> <y>
 sim-go swipe <platform> <id> <x1> <y1> <x2> <y2> [ms]
 sim-go type <platform> <id> <text...>
