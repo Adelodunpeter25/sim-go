@@ -4,7 +4,8 @@
 //
 //	sim-go list [-platform ios|android]
 //	sim-go doctor
-//	sim-go boot|shutdown|slim|restore|normalize <ios|android> <id>
+//	sim-go boot <ios|android> <id> [--slim]
+//	sim-go shutdown|slim|restore|normalize <ios|android> <id>
 //	sim-go launch <platform> <id> <bundle|package>
 //	sim-go terminate|uninstall <platform> <id> <bundle|package>
 //	sim-go install <platform> <id> <app.apk|.app>
@@ -40,7 +41,8 @@ func usage() {
 usage:
   sim-go list [-platform ios|android]
   sim-go doctor [-json]
-  sim-go boot|shutdown|slim|restore|normalize <ios|android> <id>
+  sim-go boot <ios|android> <id> [--slim]   (--slim: apply slim profile once booted)
+  sim-go shutdown|slim|restore|normalize <ios|android> <id>
   sim-go launch <platform> <id> <bundle|package>
   sim-go terminate|uninstall <platform> <id> <bundle|package>
   sim-go install <platform> <id> <app.apk|.app>
@@ -125,10 +127,21 @@ func main() {
 	case "boot", "shutdown", "slim", "restore", "normalize":
 		needArgs(4, os.Args[1]+" <ios|android> <id>")
 		op, platform, id := os.Args[1], os.Args[2], os.Args[3]
+		withSlim := false
+		if op == "boot" {
+			for _, a := range os.Args[4:] {
+				if a == "--slim" {
+					withSlim = true
+				} else {
+					fmt.Fprintf(os.Stderr, "boot: unknown flag %q\n", a)
+					exit(2)
+				}
+			}
+		}
 		var err error
 		switch op {
 		case "boot":
-			err = c.Boot(ctx, platform, id)
+			err = c.BootWith(ctx, platform, id, sdk.BootOptions{Slim: withSlim})
 		case "shutdown":
 			err = c.Shutdown(ctx, platform, id)
 		case "slim":

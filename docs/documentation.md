@@ -197,6 +197,7 @@ d, err := c.Driver("android")   // "ios"|"android" or an error
 func (c *Client) ListAll(ctx context.Context) ([]Device, error)
 func (c *Client) IsBooted(ctx context.Context, platform, id string) (bool, error)
 func (c *Client) Boot(ctx context.Context, platform, id string) error
+func (c *Client) BootWith(ctx context.Context, platform, id string, opts BootOptions) error
 func (c *Client) Shutdown(ctx context.Context, platform, id string) error
 func (c *Client) Slim(ctx context.Context, platform, id string) error
 func (c *Client) Restore(ctx context.Context, platform, id string) error
@@ -206,6 +207,14 @@ func (c *Client) Normalize(ctx context.Context, platform, id string) error
 - `ListAll` merges ios+android, sorted by platform then name.
 - `IsBooted` resolves id exactly (UDID, serial, or device name — never the
   `all` alias) and maps iOS `"Booted"` / Android `"device"` to true.
+- `Boot` blocks until the device is ready (iOS `simctl bootstatus -b`,
+  Android `sys.boot_completed`).
+- `BootWith` = `Boot` + options. `BootOptions{Slim: true}` applies the slim
+  profile after boot, so callers (e.g. console) get a slimmed device from one
+  call. Zero options == `Boot`. Android accepts an AVD name or serial; the live
+  serial is resolved internally. If slim fails the device stays running and the
+  error is prefixed `booted, but slim failed:` — boot itself succeeded.
+  Slim is opt-in: plain `Boot` never slims.
 - `Slim`/`Restore` use the fixed profile in `internal/slim` (no options by
   design). `Normalize` makes screenshots deterministic (fixed iOS status
   bar, zeroed Android animation scales); appearance/content untouched.
@@ -362,7 +371,8 @@ Use it to embed streaming in any `net/http`-compatible server (it is what
 ```
 sim-go list [-platform ios|android]
 sim-go doctor [-json]
-sim-go boot|shutdown|slim|restore|normalize <ios|android> <id>
+sim-go boot <ios|android> <id> [--slim]
+sim-go shutdown|slim|restore|normalize <ios|android> <id>
 sim-go launch <platform> <id> <bundle|package>
 sim-go terminate|uninstall <platform> <id> <bundle|package>
 sim-go install <platform> <id> <app.apk|.app>

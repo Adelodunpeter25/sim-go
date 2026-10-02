@@ -114,6 +114,53 @@ func (c *Client) Boot(ctx context.Context, platform, id string) error {
 	return d.Boot(ctx, id)
 }
 
+// BootOptions tunes BootWith. The zero value behaves exactly like Boot.
+type BootOptions struct {
+	// Slim applies the fixed slim profile once the device has finished
+	// booting. If slim fails the device is left running and the error is
+	// returned wrapped, so callers can tell boot succeeded.
+	Slim bool
+}
+
+// BootWith boots a device (blocking until it is ready, as Boot does) and then
+// applies opts. Android accepts an AVD name or serial; the live serial is
+// resolved after boot because slim needs it.
+func (c *Client) BootWith(ctx context.Context, platform, id string, opts BootOptions) error {
+	if err := c.Boot(ctx, platform, id); err != nil {
+		return err
+	}
+	if !opts.Slim {
+		return nil
+	}
+	target, err := c.bootedID(ctx, platform, id)
+	if err != nil {
+		return fmt.Errorf("booted, but slim failed: %w", err)
+	}
+	if err := c.Slim(ctx, platform, target); err != nil {
+		return fmt.Errorf("booted, but slim failed: %w", err)
+	}
+	return nil
+}
+
+// bootedID maps a user-supplied id (UDID, serial, or AVD/device name) to the
+// ID of the live booted device the drivers' verbs expect.
+func (c *Client) bootedID(ctx context.Context, platform, id string) (string, error) {
+	d, err := c.Driver(platform)
+	if err != nil {
+		return "", err
+	}
+	devs, err := d.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, dev := range devs {
+		if (dev.ID == id || dev.Name == id) && (dev.State == "Booted" || dev.State == "device") {
+			return dev.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no booted %s device %q", platform, id)
+}
+
 func (c *Client) Shutdown(ctx context.Context, platform, id string) error {
 	d, err := c.Driver(platform)
 	if err != nil {
