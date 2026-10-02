@@ -170,7 +170,10 @@ let ws = null, decoder = null, streamW = 0, streamH = 0, seq = 0, gotFrame = fal
 const canvas = $('view'), statusEl = $('status');
 
 function setStatus(s) { statusEl.textContent = s; }
-function closeDecoder() { try { decoder && decoder.close(); } catch (_) {} decoder = null; }
+// needKey is true while the decoder has no picture yet, or after a reconfigure:
+// the next chunk must be a keyframe or WebCodecs throws.
+let needKey = true;
+function closeDecoder() { try { decoder && decoder.close(); } catch (_) {} decoder = null; needKey = true; }
 
 function ensureDecoder(codec, desc) {
   if (decoder) return true;
@@ -192,9 +195,14 @@ function ensureDecoder(codec, desc) {
 
 function onBinary(buf) {
   const tag = buf[0], payload = buf.slice(1);
-  if (tag === 1) { pendingDesc = payload; return; } // description; decode starts on first media packet
+  if (tag === 1) { pendingDesc = payload; return; } // description; decode starts on first keyframe
   if (!decoder && !(pendingCodec && pendingDesc)) return; // config not complete yet
   if (!ensureDecoder(pendingCodec, pendingDesc)) return;
+  // WebCodecs requires the first chunk after configure() to be a keyframe.
+  // A joining viewer is sent the cached description before the fresh
+  // keyframe is requested, so stale deltas can arrive first: drop them.
+  if (needKey && tag !== 2) return;
+  if (tag === 2) needKey = false;
   try {
     decoder.decode(new EncodedVideoChunk({ type: tag === 2 ? 'key' : 'delta', timestamp: (seq++) * 1000, data: payload }));
   } catch (e) { err('decode: ' + e.message); }
@@ -204,7 +212,7 @@ let pendingCodec = '', pendingDesc = null;
 function connect() {
   if (!sel || ws) return;
   gotFrame = false; seq = 0; pendingCodec = ''; pendingDesc = null;
-  closeDecoder();
+  closeDecoder(); // also re-arms needKey
   setStatus('connecting…');
   ws = new WebSocket('ws://' + location.host + '/api/stream?platform=' +
     encodeURIComponent(sel.platform) + '&id=' + encodeURIComponent(sel.id));
@@ -228,6 +236,7 @@ function connect() {
 function disconnect() {
   if (ws) { try { ws.close(); } catch (_) {} ws = null; }
   closeDecoder();
+  pendingCodec = ''; pendingDesc = null;
   setStatus('disconnected');
   $('connect').disabled = false; $('disconnect').disabled = true;
 }
