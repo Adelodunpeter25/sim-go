@@ -1,4 +1,4 @@
-package main
+package sdk
 
 import (
 	"encoding/json"
@@ -150,7 +150,7 @@ func TestIOSTouchStateIsConcurrencySafe(t *testing.T) {
 // Guard against the page's own numbers drifting from what we expect.
 func TestViewerMessageJSON(t *testing.T) {
 	const raw = `{"type":"scroll","x":195,"y":422,"dx":0,"dy":-16}`
-	var vm viewerMsg
+	var vm Input
 	if err := json.Unmarshal([]byte(raw), &vm); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestViewerMessageJSON(t *testing.T) {
 	}
 	// The keycode field is documented as a number by the page.
 	const keyRaw = `{"type":"key","code":66}`
-	var kvm viewerMsg
+	var kvm Input
 	if err := json.Unmarshal([]byte(keyRaw), &kvm); err != nil {
 		t.Fatal(err)
 	}

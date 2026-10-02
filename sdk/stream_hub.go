@@ -2,7 +2,6 @@ package sdk
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -49,7 +48,7 @@ func openBackend(ctx context.Context, platform, id string) (backend, error) {
 	case "android":
 		return openAndroid(ctx, id)
 	case "ios":
-		return nil, errors.New("ios streaming is not wired into the sdk yet")
+		return openIOS(ctx, id)
 	}
 	return nil, ErrInvalidPlatform
 }
