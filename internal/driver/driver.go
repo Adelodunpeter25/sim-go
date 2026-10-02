@@ -47,6 +47,9 @@ type Driver interface {
 	// zeroed animation scales on Android. Appearance and content untouched.
 	Normalize(ctx context.Context, id string) error
 
+	// SetAppearance switches the UI between "dark" and "light".
+	SetAppearance(ctx context.Context, id, mode string) error
+
 	Tap(ctx context.Context, id string, x, y int) error
 	Swipe(ctx context.Context, id string, x1, y1, x2, y2, ms int) error
 	Type(ctx context.Context, id, text string) error

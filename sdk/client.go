@@ -186,6 +186,14 @@ func (c *Client) Press(ctx context.Context, platform, id, button string) error {
 	return d.Press(ctx, id, button)
 }
 
+func (c *Client) SetAppearance(ctx context.Context, platform, id, mode string) error {
+	d, err := c.Driver(platform)
+	if err != nil {
+		return err
+	}
+	return d.SetAppearance(ctx, id, mode)
+}
+
 func (c *Client) Tap(ctx context.Context, platform, id string, x, y int) error {
 	d, err := c.Driver(platform)
 	if err != nil {
