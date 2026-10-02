@@ -53,6 +53,9 @@ func (s *Session) StartVideo(fps uint64, scale float64) (*VideoStream, error) {
 }
 
 func (vs *VideoStream) pump() {
+	// frames closes before done so a blocked reader (e.g. a stream restart)
+	// wakes up immediately instead of hanging on a dead channel.
+	defer close(vs.frames)
 	defer close(vs.done)
 	for {
 		resp, err := vs.stream.Recv()

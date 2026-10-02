@@ -82,8 +82,12 @@ This phase buys the near-zero latency. Only starts after Phase 3 works.
   v1.1.8 (last Intel-capable, auto-fetched universal binary); HID tap/swipe
   + H.264 video over gRPC proven live (`stream-probe ios`: describe
   1170x2532/390x844, IDR, center tap, exact 3x point scale)
-- [ ] iOS serve wiring: idb sessions into `/api/stream` next to scrcpy (same
-  WS tags: meta/codec/desc/key/delta), page already platform-aware
+- [x] iOS serve wiring: idb sessions into `/api/stream` next to scrcpy (same
+  WS tags: meta/codec/desc/key/delta), page already platform-aware. Annex-B
+  → AVCC assembler (chunk boundaries, mid-NAL splits, param-set changes);
+  HID gestures replayed on release (tap vs swipe), wheel→swipe, keys/text/
+  buttons; late joiners get a re-keyframe via video-pipe restart. Proven live
+  (`TestIOSStreamLive` + ffmpeg decode of 435 frames at 1170x2532)
 
 Done when: swipe on a remote viewer feels instant; an iOS client can drive an Android emulator (server owns all device truth).
 

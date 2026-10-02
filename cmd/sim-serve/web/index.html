@@ -56,8 +56,8 @@
           <span id="status">disconnected</span>
         </div>
         <div><canvas id="view"></canvas></div>
+        <div class="note">Live H.264 for both platforms (scrcpy on Android, idb on iOS). Decoded in-page, never screenshotted.</div>
       </div>
-      <div id="novideo" class="note" hidden></div>
       <fieldset><legend>Apps</legend>
         <div class="row">
           <input type="text" id="app" placeholder="bundle id / package" size="28">
@@ -78,7 +78,7 @@
           <input type="text" id="url" placeholder="https://… or deep link" size="34">
           <button id="openurl">Open URL</button>
         </div>
-        <div class="note">Canvas gestures drive the live stream (android). The forms use the same SDK verbs over HTTP.</div>
+        <div class="note">Canvas gestures drive the live stream. The forms use the same SDK verbs over HTTP.</div>
       </fieldset>
     </div>
   </div>
@@ -124,10 +124,7 @@ function select(d) {
   sel = d;
   $('sel').textContent = d.platform + ' · ' + d.name + ' (' + d.state + ')';
   $('ctl').hidden = false;
-  const android = d.platform === 'android';
-  $('streambox').hidden = !android;
-  $('novideo').hidden = android;
-  if (!android) $('novideo').textContent = 'No live screen on iOS yet — simctl has no video path (Phase 4 helper). Lifecycle + launch + deep links below all work.';
+  $('streambox').hidden = false;
   loadDevices();
 }
 $('refresh').onclick = loadDevices;
@@ -168,7 +165,7 @@ $('openurl').onclick = async () => {
   catch (e) { err('open-url: ' + e.message); }
 };
 
-// ---------- live H.264 stream (android) ----------
+// ---------- live H.264 stream (android + ios) ----------
 let ws = null, decoder = null, streamW = 0, streamH = 0, seq = 0, gotFrame = false;
 const canvas = $('view'), statusEl = $('status');
 
@@ -209,7 +206,8 @@ function connect() {
   gotFrame = false; seq = 0; pendingCodec = ''; pendingDesc = null;
   closeDecoder();
   setStatus('connecting…');
-  ws = new WebSocket('ws://' + location.host + '/api/stream?platform=android&id=' + encodeURIComponent(sel.id));
+  ws = new WebSocket('ws://' + location.host + '/api/stream?platform=' +
+    encodeURIComponent(sel.platform) + '&id=' + encodeURIComponent(sel.id));
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => setStatus('waiting for video…');
   ws.onmessage = ev => {
@@ -224,7 +222,7 @@ function connect() {
     onBinary(new Uint8Array(ev.data));
   };
   ws.onclose = () => { ws = null; setStatus('disconnected'); $('connect').disabled = false; $('disconnect').disabled = true; };
-  ws.onerror = () => err('websocket error (is the emulator booted?)');
+  ws.onerror = () => err('websocket error (is the device booted?)');
   $('connect').disabled = true; $('disconnect').disabled = false;
 }
 function disconnect() {

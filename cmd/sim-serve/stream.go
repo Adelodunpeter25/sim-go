@@ -1,8 +1,9 @@
 package main
 
-// Android live stream: one scrcpy.Session per emulator serial, shared by
-// every browser viewer. Viewers get H.264 (AVCC) over the socket and send
-// JSON control messages back. No screenshots anywhere on this path.
+// Live stream hub: one session per device, shared by every browser viewer.
+// Android uses scrcpy, iOS uses idb's HID + H.264 companion; both hand
+// viewers the same contract — H.264 (AVCC) out, JSON control messages in.
+// No screenshots anywhere on this path.
 
 import (
 	"context"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Adelodunpeter25/sim-go/internal/idb"
 	"github.com/Adelodunpeter25/sim-go/internal/scrcpy"
 	"github.com/Adelodunpeter25/sim-go/internal/sdk"
 )
@@ -68,9 +70,21 @@ func (v *viewer) close() {
 	}
 }
 
+// streamSession is one device's live stream, whichever backend drives it.
+// Exactly one of sc (android) or ib (ios) is set.
 type streamSession struct {
-	serial  string
+	key      string // hub key: "<platform>:<serial|udid>"
+	platform string
+	width    int
+	height   int
+	name     string
+	started  time.Time
+
 	sc      *scrcpy.Session
+	ib      *idb.Session
+	touch   iosTouch
+	restart chan struct{} // buffered(1): reopen the iOS video pipe
+
 	codec   string
 	desc    []byte
 	viewers map[*viewer]bool
@@ -90,18 +104,19 @@ func newStreamHub(c *sdk.Client) *streamHub {
 	return &streamHub{sessions: map[string]*streamSession{}, sdk: c}
 }
 
-// attach resolves the serial, starts (or reuses) the session, and upgrades.
+// attach resolves the device, starts (or reuses) the session, and upgrades.
 func (h *streamHub) attach(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("platform") != "android" {
-		http.Error(w, `{"ok":false,"error":"live stream is android-only in v1 (iOS needs the Phase 4 helper)"}`, http.StatusBadRequest)
+	platform := r.URL.Query().Get("platform")
+	if platform != "android" && platform != "ios" {
+		http.Error(w, `{"ok":false,"error":"platform must be android or ios"}`, http.StatusBadRequest)
 		return
 	}
-	serial, err := h.resolveSerial(r.Context(), r.URL.Query().Get("id"))
+	id, err := h.resolveID(r.Context(), platform, r.URL.Query().Get("id"))
 	if err != nil {
 		writeJSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	ss, err := h.sessionFor(serial)
+	ss, err := h.sessionFor(platform, id)
 	if err != nil {
 		writeJSONError(w, err.Error(), http.StatusBadGateway)
 		return
@@ -123,10 +138,30 @@ func writeJSONError(w http.ResponseWriter, msg string, code int) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": msg})
 }
 
+// resolveID turns whatever the viewer sent (a serial, an AVD name, a UDID or
+// a simulator name) into the identifier the backends key on.
+func (h *streamHub) resolveID(ctx context.Context, platform, id string) (string, error) {
+	if platform == "android" {
+		return h.resolveSerial(ctx, id)
+	}
+	return h.resolveUDID(ctx, id)
+}
+
 // resolveSerial accepts an emulator serial or an AVD name with a live serial.
+// A serial-shaped id is still verified against the live device list so a typo
+// fails as "not found" instead of a confusing adb error from the backend.
 func (h *streamHub) resolveSerial(ctx context.Context, id string) (string, error) {
 	if strings.HasPrefix(id, "emulator-") {
-		return id, nil
+		devs, err := h.sdk.ListAll(ctx)
+		if err != nil {
+			return "", err
+		}
+		for _, d := range devs {
+			if d.ID == id && d.State == "device" {
+				return id, nil
+			}
+		}
+		return "", fmt.Errorf("emulator %s is not running (boot it first)", id)
 	}
 	devs, err := h.sdk.ListAll(ctx)
 	if err != nil {
@@ -140,49 +175,94 @@ func (h *streamHub) resolveSerial(ctx context.Context, id string) (string, error
 	return "", fmt.Errorf("no booted emulator for AVD %q (boot it first)", id)
 }
 
-func (h *streamHub) sessionFor(serial string) (*streamSession, error) {
+// resolveUDID accepts a booted simulator by UDID or name. A shutdown sim is
+// reported as such instead of failing later inside the companion.
+func (h *streamHub) resolveUDID(ctx context.Context, id string) (string, error) {
+	devs, err := h.sdk.ListAll(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, d := range devs {
+		if d.Platform != "ios" || (d.ID != id && d.Name != id) {
+			continue
+		}
+		if d.State != "Booted" {
+			return "", fmt.Errorf("%s is %s (boot it first)", d.Name, strings.ToLower(d.State))
+		}
+		return d.ID, nil
+	}
+	return "", fmt.Errorf("no iOS simulator %q", id)
+}
+
+func (h *streamHub) sessionFor(platform, id string) (*streamSession, error) {
+	key := platform + ":" + id
 	h.mu.Lock()
-	if ss, ok := h.sessions[serial]; ok {
+	if ss, ok := h.sessions[key]; ok {
 		h.mu.Unlock()
 		return ss, nil
 	}
 	h.mu.Unlock()
 
-	sc, err := scrcpy.Start(context.Background(), serial)
-	if err != nil {
-		return nil, err
-	}
 	ss := &streamSession{
-		serial:  serial,
-		sc:      sc,
-		viewers: map[*viewer]bool{},
-		done:    make(chan struct{}),
-		hub:     h,
+		key:      key,
+		platform: platform,
+		started:  time.Now(),
+		viewers:  map[*viewer]bool{},
+		done:     make(chan struct{}),
+		restart:  make(chan struct{}, 1),
+		hub:      h,
+	}
+	var err error
+	switch platform {
+	case "android":
+		ss.sc, err = scrcpy.Start(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		ss.width, ss.height, ss.name = ss.sc.Meta.Width, ss.sc.Meta.Height, ss.sc.Meta.Name
+	case "ios":
+		ss.ib, err = idb.Start(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		dims := ss.ib.Desc.GetTargetDescription().GetScreenDimensions()
+		ss.width, ss.height = int(dims.GetWidth()), int(dims.GetHeight())
+		ss.name = ss.ib.Desc.GetTargetDescription().GetName()
 	}
 	h.mu.Lock()
-	if dup, ok := h.sessions[serial]; ok {
+	if dup, ok := h.sessions[key]; ok {
 		h.mu.Unlock()
-		sc.Close()
+		ss.closeBackend()
 		return dup, nil
 	}
-	h.sessions[serial] = ss
+	h.sessions[key] = ss
 	h.mu.Unlock()
 	go ss.pump()
 	return ss, nil
 }
 
+// closeBackend releases the device session. Idempotent.
+func (ss *streamSession) closeBackend() {
+	if ss.sc != nil {
+		ss.sc.Close()
+	}
+	if ss.ib != nil {
+		ss.ib.Close()
+	}
+}
+
 func (h *streamHub) remove(ss *streamSession) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.sessions[ss.serial] == ss {
-		delete(h.sessions, ss.serial)
+	if h.sessions[ss.key] == ss {
+		delete(h.sessions, ss.key)
 	}
 }
 
 func (ss *streamSession) metaJSON() []byte {
 	meta, _ := json.Marshal(map[string]any{
-		"type": "meta", "width": ss.sc.Meta.Width, "height": ss.sc.Meta.Height,
-		"name": ss.sc.Meta.Name, "codec": ss.codec,
+		"type": "meta", "width": ss.width, "height": ss.height,
+		"name": ss.name, "codec": ss.codec,
 	})
 	return meta
 }
@@ -200,7 +280,14 @@ func (ss *streamSession) addViewer(v *viewer) {
 	if len(desc) > 0 {
 		pkt := append([]byte{tagDesc}, desc...)
 		_ = v.send(pkt, true)
-		_ = ss.sc.ResetVideo() // fresh keyframe for the late joiner
+		// Force a fresh keyframe for the late joiner: scrcpy re-syncs its
+		// encoder in place, idb only emits SPS/PPS+IDR on a new pipe.
+		switch {
+		case ss.sc != nil:
+			_ = ss.sc.ResetVideo()
+		case ss.ib != nil:
+			ss.requestIOSRestart()
+		}
 	}
 }
 
@@ -245,13 +332,17 @@ func (h *streamHub) closeSession(ss *streamSession) {
 	default:
 		close(ss.done)
 	}
-	ss.sc.Close()
+	ss.closeBackend()
 }
 
 // pump reads device frames forever: config rebuilds the avcC description,
 // media frames go out as AVCC tagged key/delta.
 func (ss *streamSession) pump() {
 	defer ss.hub.closeSession(ss)
+	if ss.platform == "ios" {
+		ss.pumpIOS()
+		return
+	}
 	for {
 		select {
 		case <-ss.done:
@@ -335,6 +426,10 @@ func (ss *streamSession) readLoop(v *viewer) {
 }
 
 func (ss *streamSession) handle(vm viewerMsg) {
+	if ss.platform == "ios" {
+		ss.handleIOS(vm)
+		return
+	}
 	w, h := ss.sc.Meta.Width, ss.sc.Meta.Height
 	switch vm.Type {
 	case "touch":

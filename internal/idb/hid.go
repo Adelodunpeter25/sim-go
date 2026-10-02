@@ -101,3 +101,37 @@ func (s *Session) press(ctx context.Context, down, up *gen.HIDEvent) error {
 	}
 	return nil
 }
+
+// SendEvents streams HID events over one connection and waits for the
+// companion to acknowledge the whole sequence (mirrors fb-idb's
+// send_events, so a text run goes out in order without per-event round trips).
+func (s *Session) SendEvents(ctx context.Context, events ...*gen.HIDEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	stream, err := s.client.Hid(ctx)
+	if err != nil {
+		return fmt.Errorf("idb hid: %w", err)
+	}
+	for _, ev := range events {
+		if err := stream.Send(ev); err != nil {
+			return fmt.Errorf("idb hid send: %w", err)
+		}
+	}
+	if _, err := stream.CloseAndRecv(); err != nil {
+		return fmt.Errorf("idb hid: %w", err)
+	}
+	return nil
+}
+
+// Text types a string through HID keys.
+func (s *Session) Text(ctx context.Context, text string) error {
+	events, err := TextEvents(text)
+	if err != nil && len(events) == 0 {
+		return err
+	}
+	if sendErr := s.SendEvents(ctx, events...); sendErr != nil {
+		return sendErr
+	}
+	return err
+}

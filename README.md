@@ -47,12 +47,17 @@ single HTML file, no build step):
 go run ./cmd/sim-serve            # http://127.0.0.1:8790
 ```
 
-- Android: **live H.264** over `GET /api/stream?platform=android&id=` websocket
-  (scrcpy session per emulator, shared by N viewers; meta → avcC description →
+- **Live H.264 on both platforms** over `GET /api/stream?platform=android|ios&id=`
+  (one backend session per device, shared by N viewers; meta → avcC description →
   tagged key/delta frames in, touch/scroll/key/text JSON back). Canvas gestures
   drive it; WebCodecs decodes. No screenshots anywhere on the browser path.
-- iOS: device list, boot/shutdown/slim/normalize, launch, deep links — but no
-  screen yet (`simctl` has no video path; waits for the Phase 4 helper).
+  - Android via scrcpy, iOS via a supervised `idb_companion` v1.1.8 (pinned,
+    auto-fetched universal binary). Same wire contract either way: the server
+    owns device truth, viewers only decode.
+  - iOS HID has no move event, so a gesture is replayed on release: under 8pt of
+    travel is a tap, beyond it a swipe. Wheel scroll becomes a short swipe along
+    the delta. Late joiners get a fresh keyframe (the video pipe reopens, since
+    the companion only emits SPS/PPS+IDR at stream start).
 - Loopback only, no auth.
 
 ## Build / run
@@ -74,16 +79,18 @@ starves the video encoder — observed on Intel mac),
 
 ```
 cmd/sim-go/main.go        CLI (thin consumer of internal/sdk)
-cmd/sim-serve/              browser preview (HTTP skin + embedded page)
+cmd/sim-serve/              browser preview (HTTP skin + embedded page);
+                          stream.go hub, ios.go iOS backend + NAL assembler
 internal/driver/driver.go Driver interface + Device
 internal/sdk/             embeddable facade (Client, Doctor, Normalize) — the product
 internal/slim/profile.go  fixed slim sets (from simslim categories + avdslim-style list)
 internal/ios/              simctl driver: ios.go, devices.go, apps.go, slim.go, input.go (darwin only)
 internal/android/          adb/emulator driver: android.go, discover.go, devices.go, apps.go, slim.go, input.go
 internal/scrcpy/          live Android video+input: scrcpy.go, session.go, video.go, control.go
-internal/idb/             live iOS HID+video: idb.go, session.go, hid.go, video.go,
-                          proto/ (pinned v1.1.8), gen/ (generated gRPC; the one
-                          package with external deps: grpc+protobuf)
+internal/idb/             live iOS HID+video: idb.go, session.go, hid.go,
+                          video.go, keyboard.go, proto/ (pinned v1.1.8),
+                          gen/ (generated gRPC; the one package with external
+                          deps: grpc+protobuf)
 reference/simslim         MobAI-App/simslim clone (study only, MIT)
 reference/simfleet        entropyconquers/simfleet clone (study only, MIT) + scrcpy (Apache-2.0) protocol source
 ```
