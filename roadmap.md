@@ -35,7 +35,7 @@ Smallest missing blocks. Each is one SDK method + CLI verb + real-device test.
 - [x] `Install(ctx, id, appPath)` / `Uninstall` (iOS: `simctl install/uninstall`; Android: `adb install/uninstall`)
 - [x] `AppState` / `IsBooted` helpers (resolve-before-act: exact UDID/serial, never aliases like `all`)
 - [x] `Doctor(ctx)` → `Diagnostics{Xcode, Simctl, ADB, Emulator, DiskFree}` (mirrors console `device.rs` diagnostics; powers `sim-go doctor --json`)
-- [x] `Press(ctx, id, Home|Back|Lock|Power|VolumeUp|Down)` (Android `keyevent` behind one verb; iOS returns explicit unsupported — `simctl io` has no button support, Phase 4 helper scope)
+- [x] `Press(ctx, id, Home|Back|Lock|Power|VolumeUp|Down)` (Android `keyevent` behind one verb; iOS via the pooled idb companion: home, lock/power, side, siri; back/menu/volume return explicit unsupported)
 - [x] `Normalize(ctx, id)` — deterministic screenshots: disable animations, fixed clock/battery/locale (t3code `mobile-showcase.ts` pattern)
 
 Done when: an agent can boot → install → launch → screenshot → terminate purely through SDK calls, tested on the iPhone 16e sim.
@@ -77,7 +77,7 @@ This phase buys the near-zero latency. Only starts after Phase 3 works.
   shared by N viewers; late joiners get meta + config + reset for a fresh keyframe)
 - [x] WebCodecs-capable viewer contract (server encodes once to AVCC + avcC;
   page decodes; any client — desktop, web, iOS app — just decodes)
-- [ ] Session lifecycle: survive app backgrounding, re-keyframe on reattach, clean kill on shutdown
+- [ ] Session lifecycle: survive app backgrounding, re-keyframe on reattach (iOS: done via pipe restart), clean kill on shutdown (done: `Client.Close()`)
 - [x] iOS backend unblocked: `internal/idb` supervises pinned idb_companion
   v1.1.8 (last Intel-capable, auto-fetched universal binary); HID tap/swipe
   + H.264 video over gRPC proven live (`stream-probe ios`: describe

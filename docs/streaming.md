@@ -1,6 +1,6 @@
-# Android live streaming — integration guide
+# Live streaming (Android + iOS) — integration guide
 
-How to embed sim-go's Android screen + input streaming in another
+How to embed sim-go's Android and iOS screen + input streaming in another
 application (a desktop webview, a browser page, or a fully native client).
 This document is framework agnostic: it describes wire behavior, lifecycle,
 and responsibilities. There are no code samples and no per-language notes,
@@ -10,10 +10,12 @@ except where browser behavior specifically matters.
 
 Three parties, each with one job:
 
-- **Device** (emulator or USB device): runs a pushed helper, scrcpy-server
-  v2.7, which captures the screen as H.264 video and accepts input (touch,
-  scroll, key, text) back. The helper is fetched once by sim-go and cached;
-  the application never handles the binary itself.
+- **Device**: an Android emulator or USB device runs a pushed helper,
+  scrcpy-server v2.7, which captures the screen as H.264 video and accepts
+  input (touch, scroll, key, text) back. An iOS simulator is driven from the
+  host instead, by a supervised `idb_companion` (Section 12). Both helpers
+  are fetched once by sim-go and cached; the application never handles the
+  binaries itself.
 - **sim-go server**: owns every device-side detail — pushing the helper,
   opening the tunnel, parsing video, translating input. It exposes one
   websocket route per device and converts everything into viewer-friendly
@@ -44,6 +46,9 @@ Video flows as it is encoded; input travels on the same socket.
   (`SIM_GO_ANDROID_GPU=swiftshader_indirect`). A healthy encoder can be
   confirmed independently with the platform's own screen recorder: if it
   also yields an empty file, the problem is the environment, not the stream.
+- iOS additionally needs macOS with Xcode, a **booted** simulator, and the
+  pinned idb_companion v1.1.8 (auto-fetched universal binary; set
+  `SIM_GO_IDB_COMPANION` to use a pre-provisioned copy).
 - The server binds loopback only and has no authentication. Anything running
   as the same user can drive devices, exactly as if it invoked `adb`
   directly. Never expose the port to a network.
@@ -70,15 +75,18 @@ Video flows as it is encoded; input travels on the same socket.
 
 One websocket per viewer:
 
-- Route: `/api/stream` with query parameters `platform=android` and
-  `id=` set to either the emulator serial (e.g. `emulator-5554`) or the AVD
-  name (e.g. `Pixel_7`, resolved to its live serial by the server).
-- A standard websocket handshake. Anything else on this route is an error:
-  requesting a non-Android platform fails fast; requesting an AVD with no
-  live serial fails with "boot it first"; a session that cannot start fails
-  at connect time with the device-side reason attached.
-- Keep the socket open for the life of the view. There is no heartbeat in
-  the protocol; a dead TCP connection reads as a stalled stream (Section 8).
+- Route: `/api/stream` with query parameters `platform=android|ios` and
+  `id=`: for Android the emulator serial (e.g. `emulator-5554`) or AVD name
+  (e.g. `Pixel_7`, resolved to its live serial); for iOS the simulator UDID
+  or name.
+- A standard websocket handshake. Failures happen **before** the upgrade, as
+  JSON `{"ok":false,"error":...}`: 400 for an unknown platform, 404 for an
+  unknown or not-booted device ("boot it first"), 502 when the session
+  cannot start (the device-side reason is attached).
+- Keep the socket open for the life of the view. The server sends websocket
+  pings every 54 s and drops a peer that does not answer within 60 s; browsers
+  and standard libraries answer pings automatically. Viewers need no
+  heartbeat of their own.
 
 ## 5. Message framing
 
@@ -112,11 +120,15 @@ Two directions, two shapes.
 - Scroll: `type` `"scroll"`, position `x`/`y` in stream pixels, `dx`/`dy`
   scroll amounts.
 - Key: `type` `"key"`, `code` an Android keycode number (e.g. 3 home,
-  4 back, 26 power, 24/25 volume, 66 enter, 67 backspace, 82 menu).
+  4 back, 26 power, 24/25 volume, 66 enter, 67 backspace, 82 menu). On iOS
+  only 3 (home), 4 (escape), 66 (return) and 67 (delete) act; other codes
+  are ignored.
 - Text: `type` `"text"`, `text` the string (truncated server-side at
   300 bytes).
 - Button: `type` `"button"`, `button` one of `home`, `back`, `menu`,
-  `power`, `volume-up`, `volume-down` (convenience over raw keycodes).
+  `power`, `volume-up`, `volume-down` (convenience over raw keycodes). On
+  iOS `home`, `power`/`lock`, `side` and `siri` act; `back`, `menu` and
+  volume buttons are ignored.
 - Reset: `type` `"reset"`, asks the encoder for a fresh description plus
   key frame (what late joiners trigger automatically).
 - Malformed messages are ignored, never fatal to the session.
@@ -126,7 +138,9 @@ Two directions, two shapes.
 - The announced width/height is the truth. Map client pointer positions
   into stream pixels before sending: multiply by stream-size divided by
   displayed-size, per axis. Never send display pixels.
-- The stream keeps the device aspect ratio at or under the 1280 px cap
+- iOS streams at native pixels (e.g. 1170x2532 for a 390x844-point
+  device). Send stream pixels all the same: the server converts to points.
+- The Android stream keeps the device aspect ratio at or under the 1280 px cap
   (e.g. a 1080x2400 panel arrives as 576x1280). Size the drawing surface to
   the announced size on every description, not just on connect.
 - Rotation is not currently handled: expect portrait panels from phone
@@ -150,7 +164,7 @@ Two directions, two shapes.
 
 | Symptom | Likely cause | Recovery |
 |---|---|---|
-| Connect rejected, no live serial | Emulator not booted | Boot it, then attach |
+| Connect rejected (404), no live serial or simulator | Device not booted | Boot it, then attach |
 | Connect accepted, meta arrives, no frames | Encoder starved (host GPU path) | Switch host to software rendering; verify with the platform recorder |
 | Frames flow, then stop mid-stream | Emulator asleep/killed or tunnel dropped | Re-resolve the device and re-attach; treat closes as re-attach signals |
 | Decoder errors on valid-looking bytes | Missed description/key frame | Send `reset`, wait for description + key frame |
@@ -158,9 +172,9 @@ Two directions, two shapes.
 
 ## 9. Embedding checklist
 
- keyworded by client kind, in integration order:
+In integration order:
 
-1. Resolve the device (serial or AVD name) and confirm it is booted.
+1. Resolve the device (serial, AVD name, UDID or simulator name) and confirm it is booted.
 2. Open one socket per visible view; close it when the view hides (feeds the 30 s idle close).
 3. On description: size the surface, (re)configure the decoder.
 4. Render key frames immediately; deltas in order; never buffer for smoothness — the encoder already paces.
@@ -194,3 +208,34 @@ sync, no display rotation handling, no multi-display, no recording. Each of
 these is a separate protocol surface and is out of scope for this route.
 Device management (boot, shutdown, slim, install, launch) lives on the
 companion HTTP verbs, not here.
+
+## 12. iOS specifics
+
+The wire contract above is identical for iOS; only the backend differs.
+
+- **Companion backend.** One `idb_companion` process per simulator UDID,
+  shared process-wide by the live stream and the CLI/SDK verbs (`Tap`,
+  `Swipe`, `Type`, `Key`, `Press`) through a refcounted pool. The pool closes
+  a companion 30 s after its last user. `Client.Close()` tears down whatever
+  is still pooled.
+- **Annex-B to AVCC.** The companion emits Annex-B H.264; the server
+  reassembles pictures (across chunk boundaries and mid-NAL splits), builds
+  the avcC description, and sends AVCC, so viewers need no iOS-specific code.
+- **Points mapping.** HID input is in device points, the stream is in pixels.
+  The server divides stream pixels by the pixels-per-point scale reported by
+  the companion (3x on a 1170x2532 / 390x844 device).
+- **Gesture on release.** iOS HID has no move event, so a gesture is
+  replayed when the finger lifts: travel of at most 8 points between down
+  and up is a tap, anything further is a swipe from the down point to the up
+  point. `move` messages are accepted and ignored. Because of this, a drag
+  shows no motion until release.
+- **Wheel to swipe.** A `scroll` message becomes a short swipe from the
+  pointer along `dx`/`dy` (converted to points), the closest equivalent to a
+  wheel.
+- **Restart on late join.** The companion emits SPS/PPS and the IDR only at
+  stream start, so it cannot be asked for a key frame. A viewer that joins a
+  session older than 5 s (or sends `reset`) makes the server reopen the video
+  pipe, which produces a fresh description and key frame. Viewers that joined
+  earlier see a brief discontinuity and recover on that key frame.
+- **Not supported on iOS.** Back, menu and volume buttons; Android keycodes
+  other than the four listed in Section 5.
