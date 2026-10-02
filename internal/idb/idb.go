@@ -44,6 +44,10 @@ func CompanionPath() string {
 	return filepath.Join(cache, "sim-go", "idb", "v"+Version, "idb-companion.universal", "bin", "idb_companion")
 }
 
+// CompanionCached reports whether a runnable companion is already on disk
+// (override or cache), without touching the network.
+func CompanionCached() bool { return isExecFile(CompanionPath()) }
+
 // EnsureCompanion guarantees a runnable companion: override, cache hit, or
 // one download + extract (~17MB, cached afterwards).
 func EnsureCompanion(ctx context.Context) (string, error) {

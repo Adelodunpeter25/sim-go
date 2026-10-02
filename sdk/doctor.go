@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/Adelodunpeter25/sim-go/internal/android"
+	"github.com/Adelodunpeter25/sim-go/internal/idb"
 )
 
 // Diagnostics mirrors what console's device service needs before touching a
@@ -19,12 +20,15 @@ type Diagnostics struct {
 	SimctlAvailable bool   `json:"simctlAvailable"`
 	ADBAvailable    bool   `json:"adbAvailable"`
 	EmulatorAvail   bool   `json:"emulatorAvailable"`
-	DiskFreeBytes   uint64 `json:"diskFreeBytes"`
-	HasEnoughDiskGB bool   `json:"hasEnoughDisk"`
-	IOSUsable       bool   `json:"iosUsable"`
-	AndroidUsable   bool   `json:"androidUsable"`
-	XcodeSelectPath string `json:"xcodeSelectPath,omitempty"`
-	Detail          string `json:"detail,omitempty"`
+	// IDBCompanionAvailable is true when the pinned idb_companion is already
+	// cached; false means the first iOS input/stream will download it once.
+	IDBCompanionAvailable bool   `json:"idbCompanionAvailable"`
+	DiskFreeBytes         uint64 `json:"diskFreeBytes"`
+	HasEnoughDiskGB       bool   `json:"hasEnoughDisk"`
+	IOSUsable             bool   `json:"iosUsable"`
+	AndroidUsable         bool   `json:"androidUsable"`
+	XcodeSelectPath       string `json:"xcodeSelectPath,omitempty"`
+	Detail                string `json:"detail,omitempty"`
 }
 
 // Doctor probes the host. It never fails: missing tools read as false flags,
@@ -36,6 +40,7 @@ func (c *Client) Doctor(ctx context.Context) Diagnostics {
 			d.XcodeSelectPath = strings.TrimSpace(string(out))
 			d.XcodeInstalled = strings.Contains(d.XcodeSelectPath, "Xcode.app")
 		}
+		d.IDBCompanionAvailable = idb.CompanionCached()
 		if err := c.drivers["ios"].Available(ctx); err == nil {
 			d.SimctlAvailable = true
 		}
