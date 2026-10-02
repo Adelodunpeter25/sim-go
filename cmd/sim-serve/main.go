@@ -241,8 +241,7 @@ func newMux(c *sdk.Client) (*http.ServeMux, error) {
 		}
 		ok(w, nil)
 	})
-	hub := newStreamHub(c)
-	mux.HandleFunc("/api/stream", hub.attach)
+	mux.HandleFunc("/api/stream", newStreamAPI(c).attach)
 
 	return mux, nil
 }
