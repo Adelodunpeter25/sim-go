@@ -21,7 +21,10 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/Adelodunpeter25/sim-go/sdk"
 	"github.com/Adelodunpeter25/sim-go/sdk/streamws"
@@ -33,16 +36,32 @@ var webFS embed.FS
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8790", "loopback listen address (do not expose to a network)")
 	flag.Parse()
-	mux, err := newMux(sdk.New())
+	client := sdk.New()
+	defer client.Close()
+	mux, err := newMux(client)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "web:", err)
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "sim-serve on http://%s\n", *addr)
-	if err := http.ListenAndServe(*addr, mux); err != nil {
+	srv := &http.Server{Addr: *addr, Handler: mux}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		<-sigs
+		// Close first so companions die even if open streams stall Shutdown.
+		client.Close()
+		sctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(sctx)
+		close(done)
+	}()
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintln(os.Stderr, "serve:", err)
 		os.Exit(1)
 	}
+	<-done
 }
 
 func newMux(c *sdk.Client) (*http.ServeMux, error) {
