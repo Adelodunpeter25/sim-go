@@ -50,6 +50,11 @@ type Driver interface {
 	// SetAppearance switches the UI between "dark" and "light".
 	SetAppearance(ctx context.Context, id, mode string) error
 
+	// Appearance reports the current mode: "dark" or "light". Android may
+	// instead return "auto", "custom_schedule" or "custom_bedtime" when the
+	// device follows a schedule.
+	Appearance(ctx context.Context, id string) (string, error)
+
 	Tap(ctx context.Context, id string, x, y int) error
 	Swipe(ctx context.Context, id string, x1, y1, x2, y2, ms int) error
 	Type(ctx context.Context, id, text string) error

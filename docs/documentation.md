@@ -183,7 +183,7 @@ func (c *Client) Close() error  // tear down pooled idb companions; defer it
 
 `Driver` is the per-platform toolchain interface
 (`Name, Available, List, Boot, Shutdown, Slim, Restore, Launch, Terminate,
-Install, Uninstall, IsInstalled, Press, SetAppearance, Normalize, Tap, Swipe,
+Install, Uninstall, IsInstalled, Press, SetAppearance, Appearance, Normalize, Tap, Swipe,
 Type, Key, OpenURL, Screenshot`). You normally don't touch it — but you can
 fetch one and call it directly:
 
@@ -242,6 +242,7 @@ func (c *Client) Type(ctx context.Context, platform, id, text string) error
 func (c *Client) Key(ctx context.Context, platform, id, code string) error
 func (c *Client) Press(ctx context.Context, platform, id, button string) error
 func (c *Client) SetAppearance(ctx context.Context, platform, id, mode string) error
+func (c *Client) Appearance(ctx context.Context, platform, id string) (string, error)
 func (c *Client) OpenURL(ctx context.Context, platform, id, url string) error
 func (c *Client) Screenshot(ctx context.Context, platform, id, outPath string) error
 ```
@@ -252,6 +253,8 @@ func (c *Client) Screenshot(ctx context.Context, platform, id, outPath string) e
 - `Press` button: `home|back|lock|power|volume-up|volume-down|menu|app-switcher`
   (+ iOS `side|siri`). Unsupported combinations return an explicit error.
 - `SetAppearance` mode: `dark` or `light`.
+- `Appearance` returns `dark` or `light`. On Android a device following a
+  schedule returns the raw setting (`auto`, `custom_schedule`, `custom_bedtime`).
 
 ### Doctor
 

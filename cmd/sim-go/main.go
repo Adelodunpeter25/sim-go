@@ -47,7 +47,7 @@ usage:
   sim-go terminate|uninstall <platform> <id> <bundle|package>
   sim-go install <platform> <id> <app.apk|.app>
   sim-go press <platform> <id> <button>
-  sim-go appearance <platform> <id> <dark|light>
+  sim-go appearance <platform> <id> [dark|light]   (no mode: print current)
   sim-go tap <platform> <id> <x> <y>
   sim-go swipe <platform> <id> <x1> <y1> <x2> <y2> [ms]
   sim-go type <platform> <id> <text...>
@@ -176,7 +176,16 @@ func main() {
 		needArgs(5, "press <platform> <id> <home|back|lock|power|volume-up|volume-down|menu|app-switcher>")
 		ok("press", c.Press(ctx, os.Args[2], os.Args[3], os.Args[4]))
 	case "appearance":
-		needArgs(5, "appearance <platform> <id> <dark|light>")
+		if len(os.Args) == 4 {
+			mode, err := c.Appearance(ctx, os.Args[2], os.Args[3])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "appearance: error: %v\n", err)
+				exit(1)
+			}
+			fmt.Println(mode)
+			break
+		}
+		needArgs(5, "appearance <platform> <id> [dark|light]")
 		ok("appearance", c.SetAppearance(ctx, os.Args[2], os.Args[3], os.Args[4]))
 	case "tap":
 		needArgs(6, "tap <platform> <id> <x> <y>")

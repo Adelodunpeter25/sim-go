@@ -241,6 +241,15 @@ func (c *Client) SetAppearance(ctx context.Context, platform, id, mode string) e
 	return d.SetAppearance(ctx, id, mode)
 }
 
+// Appearance returns the device's current UI mode.
+func (c *Client) Appearance(ctx context.Context, platform, id string) (string, error) {
+	d, err := c.Driver(platform)
+	if err != nil {
+		return "", err
+	}
+	return d.Appearance(ctx, id)
+}
+
 func (c *Client) Tap(ctx context.Context, platform, id string, x, y int) error {
 	d, err := c.Driver(platform)
 	if err != nil {
