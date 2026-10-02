@@ -146,55 +146,214 @@ _ = c.Normalize(ctx, platform, id) // deterministic screenshots: fixed iOS statu
 
 ---
 
-## 4. HTTP API (`cmd/sim-serve`)
+## 4. SDK API reference (exhaustive)
 
-Start it:
+Import:
 
-```bash
-go run ./cmd/sim-serve            # http://127.0.0.1:8790 (loopback only, no auth)
-go run ./cmd/sim-serve -addr 127.0.0.1:9000
+```go
+import simgo "github.com/Adelodunpeter25/sim-go/sdk"
 ```
 
-All verb endpoints are `POST` with a JSON body; responses are JSON.
-Success: `{"ok": true, ...}`. Failure: HTTP 500 `{"ok": false, "error": "..."}`.
-`/api/devices` and `/api/stream` are GET.
+Everything below is the public surface. Internal packages (`internal/ios`,
+`internal/android`, `internal/scrcpy`, `internal/idb`, `internal/driver`,
+`internal/slim`) are not importable by consumers.
 
-| Endpoint | Body | Response |
-|---|---|---|
-| `GET /api/devices` | — | `[{platform,id,name,state,os}, ...]` |
-| `GET /api/doctor` | — | `Diagnostics` object (see below) |
-| `POST /api/boot` | `{platform,id}` | `{ok:true}` |
-| `POST /api/shutdown` | `{platform,id}` | `{ok:true}` |
-| `POST /api/slim` | `{platform,id}` | `{ok:true}` |
-| `POST /api/restore` | `{platform,id}` | `{ok:true}` |
-| `POST /api/normalize` | `{platform,id}` | `{ok:true}` |
-| `POST /api/launch` | `{platform,id,app}` | `{ok:true, output}` |
-| `POST /api/terminate` | `{platform,id,app}` | `{ok:true}` |
-| `POST /api/install` | `{platform,id,path}` | `{ok:true}` (path is server-local) |
-| `POST /api/uninstall` | `{platform,id,app}` | `{ok:true}` |
-| `POST /api/tap` | `{platform,id,x,y}` | `{ok:true}` |
-| `POST /api/swipe` | `{platform,id,x1,y1,x2,y2,ms}` | `{ok:true}` |
-| `POST /api/type` | `{platform,id,text}` | `{ok:true}` |
-| `POST /api/key` | `{platform,id,code}` | `{ok:true}` |
-| `POST /api/press` | `{platform,id,button}` | `{ok:true}` |
-| `POST /api/open-url` | `{platform,id,url}` | `{ok:true}` |
-| `GET /api/stream?platform=&id=` | websocket upgrade | see Section 6 |
+### Types and constructors
 
-`platform` is `"ios"` or `"android"`. `id` is a UDID/simulator name (iOS) or
-serial/AVD name (Android).
-
-Examples:
-
-```bash
-curl -s http://127.0.0.1:8790/api/doctor
-curl -s -X POST http://127.0.0.1:8790/api/boot   -d '{"platform":"android","id":"Pixel_7"}'
-curl -s -X POST http://127.0.0.1:8790/api/launch -d '{"platform":"ios","id":"ABCD-1234","app":"com.apple.Preferences"}'
-curl -s -X POST http://127.0.0.1:8790/api/tap    -d '{"platform":"android","id":"emulator-5554","x":540,"y":960}'
+```go
+type Device = driver.Device   // alias; never import internal/driver yourself
+type Driver = driver.Driver   // alias; the per-platform toolchain interface
 ```
 
-`Diagnostics` fields: `os`, `xcodeInstalled`, `simctlAvailable`,
-`adbAvailable`, `emulatorAvailable`, `idbCompanionAvailable`,
-`diskFreeBytes`, `hasEnoughDisk`, `iosUsable`, `androidUsable`.
+```go
+type Device struct {
+    Platform string // "ios" or "android"
+    ID       string // UDID (ios) or serial/AVD (android)
+    Name     string
+    State    string // "Booted"/"Shutdown" (ios), "device"/"offline"/"avd" (android)
+    OS       string // optional
+}
+```
+
+```go
+type Client struct { /* opaque */ }
+func New() *Client          // Client with the built-in ios+android drivers
+func (c *Client) Close() error  // tear down pooled idb companions; defer it
+```
+
+`Driver` is the per-platform toolchain interface
+(`Name, Available, List, Boot, Shutdown, Slim, Restore, Launch, Terminate,
+Install, Uninstall, IsInstalled, Press, SetAppearance, Normalize, Tap, Swipe,
+Type, Key, OpenURL, Screenshot`). You normally don't touch it — but you can
+fetch one and call it directly:
+
+```go
+d, err := c.Driver("android")   // "ios"|"android" or an error
+```
+
+### Device lifecycle
+
+```go
+func (c *Client) ListAll(ctx context.Context) ([]Device, error)
+func (c *Client) IsBooted(ctx context.Context, platform, id string) (bool, error)
+func (c *Client) Boot(ctx context.Context, platform, id string) error
+func (c *Client) Shutdown(ctx context.Context, platform, id string) error
+func (c *Client) Slim(ctx context.Context, platform, id string) error
+func (c *Client) Restore(ctx context.Context, platform, id string) error
+func (c *Client) Normalize(ctx context.Context, platform, id string) error
+```
+
+- `ListAll` merges ios+android, sorted by platform then name.
+- `IsBooted` resolves id exactly (UDID, serial, or device name — never the
+  `all` alias) and maps iOS `"Booted"` / Android `"device"` to true.
+- `Slim`/`Restore` use the fixed profile in `internal/slim` (no options by
+  design). `Normalize` makes screenshots deterministic (fixed iOS status
+  bar, zeroed Android animation scales); appearance/content untouched.
+
+### Apps
+
+```go
+func (c *Client) Launch(ctx context.Context, platform, id, app string) (string, error)
+func (c *Client) Terminate(ctx context.Context, platform, id, app string) error
+func (c *Client) Install(ctx context.Context, platform, id, appPath string) error
+func (c *Client) Uninstall(ctx context.Context, platform, id, app string) error
+func (c *Client) IsInstalled(ctx context.Context, platform, id, app string) (bool, error)
+```
+
+`app` is a bundle ID (iOS) or package name (Android). `appPath` is a `.app`
+directory (iOS) or `.apk` file (Android). `Launch` returns the platform
+tool's stdout line (pid etc.).
+
+### Input / device verbs
+
+```go
+func (c *Client) Tap(ctx context.Context, platform, id string, x, y int) error
+func (c *Client) Swipe(ctx context.Context, platform, id string, x1, y1, x2, y2, ms int) error
+func (c *Client) Type(ctx context.Context, platform, id, text string) error
+func (c *Client) Key(ctx context.Context, platform, id, code string) error
+func (c *Client) Press(ctx context.Context, platform, id, button string) error
+func (c *Client) SetAppearance(ctx context.Context, platform, id, mode string) error
+func (c *Client) OpenURL(ctx context.Context, platform, id, url string) error
+func (c *Client) Screenshot(ctx context.Context, platform, id, outPath string) error
+```
+
+- iOS coordinates are points; Android coordinates are pixels — each driver maps.
+- `Key` accepts an Android `KEYCODE_*` name/number; on iOS only `3, 4, 66, 67`
+  are honored, others error.
+- `Press` button: `home|back|lock|power|volume-up|volume-down|menu|app-switcher`
+  (+ iOS `side|siri`). Unsupported combinations return an explicit error.
+- `SetAppearance` mode: `dark` or `light`.
+
+### Doctor
+
+```go
+type Diagnostics struct {
+    OS, XcodeSelectPath, Detail                  string
+    XcodeInstalled, SimctlAvailable, ADBAvailable,
+    EmulatorAvail, IDBCompanionAvailable,
+    HasEnoughDiskGB, IOSUsable, AndroidUsable    bool
+    DiskFreeBytes                                uint64
+}
+func (c *Client) Doctor(ctx context.Context) Diagnostics
+```
+
+Never fails: missing tools read as `false` flags; `Detail` carries the
+human summary. `IDBCompanionAvailable == false` only means the first iOS
+input/stream will download the pinned companion once.
+
+### Live streaming (`Client.Stream` and friends)
+
+```go
+func (c *Client) Stream(ctx context.Context, platform, id string) (*Stream, error)
+```
+
+One shared backend session per device; each call returns one viewer handle.
+
+```go
+type StreamMeta struct { Width, Height int; Name, Codec string }
+
+type PacketKind int
+const (
+    PacketMeta        PacketKind = iota + 1 // Packet.Meta carries size/name/codec
+    PacketDescription                       // avcC decoder configuration
+    PacketKeyFrame                          // AVCC IDR picture
+    PacketDelta                             // AVCC non-key picture
+)
+
+type Packet struct {
+    Kind PacketKind
+    Meta StreamMeta // only for PacketMeta
+    Data []byte     // every other kind; shared read-only across viewers
+}
+```
+
+```go
+type Stream struct { /* opaque */ }
+func (s *Stream) Meta() StreamMeta        // current video description
+func (s *Stream) Packets() <-chan Packet  // closed on end; see Err
+func (s *Stream) Err() error              // why Packets closed; nil while open
+func (s *Stream) Input(in Input) error
+func (s *Stream) Touch(action string, x, y int) error        // "down"|"move"|"up"
+func (s *Stream) Scroll(x, y int, dx, dy float64) error
+func (s *Stream) Key(code int) error                         // Android keycode
+func (s *Stream) Text(text string) error
+func (s *Stream) Button(name string) error                   // home|back|menu|power|...
+func (s *Stream) Reset() error                               // fresh description+keyframe
+func (s *Stream) Close() error                               // detach this viewer
+```
+
+```go
+// Input is also the JSON wire shape for websocket viewers:
+type Input struct {
+    Type   string  `json:"type"`             // touch|scroll|key|text|button|reset
+    Action string  `json:"action,omitempty"` // touch only
+    X, Y   int     `json:"x,omitempty"`
+    DX, DY float64 `json:"dx,omitempty"`     // scroll deltas, pixels
+    Code   int     `json:"code,omitempty"`   // key: Android keycode
+    Text   string  `json:"text,omitempty"`
+    Button string  `json:"button,omitempty"`
+}
+```
+
+Error sentinels (match with `errors.Is`):
+
+```go
+ErrInvalidPlatform  // platform is not ios or android
+ErrDeviceNotFound   // no such device, or not booted
+ErrBackendStart     // device exists but its stream backend failed to start
+ErrStreamClosed     // Input on a closed/ended Stream
+ErrStreamEnded      // device session ended under this viewer
+ErrSlowViewer       // viewer fell behind (>120 buffered packets) and was dropped
+```
+
+Typical consumption loop:
+
+```go
+s, err := c.Stream(ctx, "android", "Pixel_7")
+if err != nil { ... }
+defer s.Close()
+for p := range s.Packets() {
+    switch p.Kind {
+    case sdk.PacketMeta:        configureDecoder(p.Meta)
+    case sdk.PacketDescription: decoderConfig(p.Data)
+    case sdk.PacketKeyFrame, sdk.PacketDelta:
+        feed(p.Kind == sdk.PacketKeyFrame, p.Data)
+    }
+}
+if err := s.Err(); err != nil && !errors.Is(err, sdk.ErrSlowViewer) { ... }
+s.Touch("down", x, y); s.Touch("up", x, y)
+```
+
+### Websocket adapter
+
+```go
+// sdk/streamws — the only package with an HTTP dependency:
+func streamws.Handler(c *sdk.Client) http.Handler
+```
+
+Serves the exact wire protocol in Section 6 over `/api/stream?platform=&id=`.
+Use it to embed streaming in any `net/http`-compatible server (it is what
+`cmd/sim-serve` mounts).
 
 ---
 
