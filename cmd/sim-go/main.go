@@ -68,16 +68,17 @@ env:
 func main() {
 	if len(os.Args) < 2 {
 		usage()
-		os.Exit(2)
+		exit(2)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	c := sdk.New()
+	defer c.Close()
 
 	ok := func(op string, err error) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: error: %v\n", op, err)
-			os.Exit(1)
+			exit(1)
 		}
 		fmt.Printf("%s: ok\n", op)
 	}
@@ -94,7 +95,7 @@ func main() {
 		devs, err := c.ListAll(ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "list: error: %v\n", err)
-			os.Exit(1)
+			exit(1)
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "PLATFORM\tID\tNAME\tSTATE\tOS")
@@ -142,7 +143,7 @@ func main() {
 		out, err := c.Launch(ctx, os.Args[2], os.Args[3], os.Args[4])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "launch: error: %v\n", err)
-			os.Exit(1)
+			exit(1)
 		}
 		fmt.Printf("launch: ok %s\n", out)
 	case "terminate", "uninstall":
@@ -210,7 +211,7 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		usage()
-		os.Exit(2)
+		exit(2)
 	}
 }
 
@@ -241,7 +242,7 @@ func runAndroidProbe(ctx context.Context, c *sdk.Client, id string) {
 		devs, err := c.ListAll(ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "stream-probe: list: %v\n", err)
-			os.Exit(1)
+			exit(1)
 		}
 		found := false
 		for _, d := range devs {
@@ -253,25 +254,25 @@ func runAndroidProbe(ctx context.Context, c *sdk.Client, id string) {
 		}
 		if !found {
 			fmt.Fprintf(os.Stderr, "stream-probe: no booted emulator for AVD %q (boot it first)\n", id)
-			os.Exit(1)
+			exit(1)
 		}
 	}
 	sess, err := scrcpy.Start(ctx, serial)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stream-probe: start: %v\n", err)
-		os.Exit(1)
+		exit(1)
 	}
 	defer sess.Close()
 	fmt.Printf("stream: %s %dx%d (%s)\n", sess.Meta.Name, sess.Meta.Width, sess.Meta.Height, serial)
 	frame, err := sess.WaitKeyframe(30 * time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stream-probe: keyframe: %v\n", err)
-		os.Exit(1)
+		exit(1)
 	}
 	fmt.Printf("keyframe: %d bytes H.264\n", len(frame.Payload))
 	if err := sess.Tap(sess.Meta.Width/2, sess.Meta.Height/2); err != nil {
 		fmt.Fprintf(os.Stderr, "stream-probe: tap: %v\n", err)
-		os.Exit(1)
+		exit(1)
 	}
 	fmt.Println("tap: ok (center)")
 }
@@ -286,7 +287,7 @@ func runIOSProbe(ctx context.Context, udid string) {
 	sess, err := idb.Start(ctx, udid)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stream-probe: start: %v\n", err)
-		os.Exit(1)
+		exit(1)
 	}
 	defer sess.Close()
 	dims := sess.Desc.GetTargetDescription().GetScreenDimensions()
@@ -296,13 +297,13 @@ func runIOSProbe(ctx context.Context, udid string) {
 	vs, err := sess.StartVideo(30, 1)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stream-probe: video: %v\n", err)
-		os.Exit(1)
+		exit(1)
 	}
 	defer vs.Stop()
 	nals, err := waitIDR(vs, 30*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stream-probe: keyframe: %v\n", err)
-		os.Exit(1)
+		exit(1)
 	}
 	fmt.Printf("idr: SPS+PPS+IDR seen (%d NALs reassembled)\n", nals)
 	sx, sy := sess.Points()
@@ -310,7 +311,7 @@ func runIOSProbe(ctx context.Context, udid string) {
 	cx, cy := float64(dims.GetWidthPoints())/2, float64(dims.GetHeightPoints())/2
 	if err := sess.Tap(ctx, cx, cy); err != nil {
 		fmt.Fprintf(os.Stderr, "stream-probe: tap: %v\n", err)
-		os.Exit(1)
+		exit(1)
 	}
 	fmt.Printf("tap: ok (%.0f,%.0f pt)\n", cx, cy)
 }
@@ -387,7 +388,7 @@ func splitAnnexB(b []byte) [][]byte {
 
 func die(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
-	os.Exit(2)
+	exit(2)
 }
 
 func join(parts []string) string {
@@ -399,4 +400,11 @@ func join(parts []string) string {
 		out += p
 	}
 	return out
+}
+
+// exit closes pooled helpers before leaving: os.Exit skips defers, and an
+// unclosed idb_companion would be orphaned.
+func exit(code int) {
+	idb.CloseAll()
+	os.Exit(code)
 }

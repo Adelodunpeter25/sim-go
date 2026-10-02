@@ -13,6 +13,7 @@ import (
 
 	"github.com/Adelodunpeter25/sim-go/internal/android"
 	"github.com/Adelodunpeter25/sim-go/internal/driver"
+	"github.com/Adelodunpeter25/sim-go/internal/idb"
 	"github.com/Adelodunpeter25/sim-go/internal/ios"
 )
 
@@ -33,6 +34,14 @@ func New() *Client {
 		"ios":     ios.Driver{},
 		"android": android.Driver{},
 	}}
+}
+
+// Close tears down pooled helper processes (idb companions). One-shot
+// callers must defer it: macOS has no parent-death signal, so an unclosed
+// companion would outlive the process.
+func (c *Client) Close() error {
+	idb.CloseAll()
+	return nil
 }
 
 // Driver resolves a platform name or returns a descriptive error.
