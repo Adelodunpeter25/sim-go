@@ -192,3 +192,17 @@ func sendClientText(t *testing.T, conn net.Conn, s string) {
 		t.Fatal(err)
 	}
 }
+
+// Opcodes of the raw frames the live tests parse by hand.
+const (
+	wsText   = 1
+	wsBinary = 2
+)
+
+// The wire tags, restated here on purpose: these tests pin the contract the
+// page depends on, independent of the names streamws uses.
+const (
+	tagDesc  = 1
+	tagKey   = 2
+	tagDelta = 3
+)

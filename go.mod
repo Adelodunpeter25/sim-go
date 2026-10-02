@@ -3,6 +3,7 @@ module github.com/Adelodunpeter25/sim-go
 go 1.25.0
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 )

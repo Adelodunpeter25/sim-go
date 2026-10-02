@@ -24,6 +24,7 @@ import (
 	"strconv"
 
 	"github.com/Adelodunpeter25/sim-go/sdk"
+	"github.com/Adelodunpeter25/sim-go/sdk/streamws"
 )
 
 //go:embed web/index.html
@@ -241,7 +242,7 @@ func newMux(c *sdk.Client) (*http.ServeMux, error) {
 		}
 		ok(w, nil)
 	})
-	mux.HandleFunc("/api/stream", newStreamAPI(c).attach)
+	mux.Handle("/api/stream", streamws.Handler(c))
 
 	return mux, nil
 }
