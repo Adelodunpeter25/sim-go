@@ -62,7 +62,7 @@ go run ./cmd/sim-serve            # http://127.0.0.1:8790
     travel is a tap, beyond it a swipe. Wheel scroll becomes a short swipe along
     the delta. Late joiners get a fresh keyframe (the video pipe reopens, since
     the companion only emits SPS/PPS+IDR at stream start).
-- Loopback only, no auth. Full wire and embedding guide: `docs/streaming.md`.
+- Loopback only, no auth. Full wire and embedding guide: `docs/documentation.md`.
 
 ## Build / run
 
@@ -110,7 +110,7 @@ reference/simfleet        entropyconquers/simfleet clone (study only, MIT) + scr
   gives HID tap/swipe/text/keys/buttons + H.264 over gRPC. Wired into the
   SDK (`Client.Stream`, the iOS driver verbs) and the browser preview.
 - iOS has no HID move event: drags are replayed on release (see
-  `docs/streaming.md`), and back/menu/volume buttons are unsupported.
+  `docs/documentation.md`), and back/menu/volume buttons are unsupported.
 - Android video needs working on-device encoding: `-gpu host` starves the
   encoder on Intel mac (screenrecord/scrcpy get zero frames); boot with
   `SIM_GO_ANDROID_GPU=swiftshader_indirect` there.
