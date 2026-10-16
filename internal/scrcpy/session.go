@@ -75,11 +75,19 @@ func start(ctx context.Context, serial string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	stat, err := os.Stat(server)
+	if err != nil {
+		return nil, fmt.Errorf("stat local scrcpy server: %w", err)
+	}
 	remote := "/data/local/tmp/sim-go-scrcpy-" + Version + ".jar"
-	if out, err := runAdb(ctx, adb, "-s", serial, "shell", "ls", remote); err != nil ||
-		!strings.Contains(string(out), remote) {
-		if out, err := runAdb(ctx, adb, "-s", serial, "push", server, remote); err != nil {
+	out, err := runAdb(ctx, adb, "-s", serial, "shell", "stat", "-c", "%s", remote)
+	if needsPush(stat.Size(), out, err) {
+		tmp := remote + ".tmp"
+		if out, err := runAdb(ctx, adb, "-s", serial, "push", server, tmp); err != nil {
 			return nil, fmt.Errorf("push scrcpy server: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		if out, err := runAdb(ctx, adb, "-s", serial, "shell", "mv", tmp, remote); err != nil {
+			return nil, fmt.Errorf("install scrcpy server: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 	}
 	// scid is parsed as HEX and must fit int32 (see Options.parse):
@@ -89,11 +97,20 @@ func start(ctx context.Context, serial string) (*Session, error) {
 		return nil, err
 	}
 	scid := strconv.FormatUint(uint64(binary.BigEndian.Uint32(scidBytes[:])&0x7fffffff), 16)
-	out, err := runAdb(ctx, adb, "-s", serial, "forward", "tcp:0", "localabstract:scrcpy_"+scid)
+	var s *Session
+	var port int
+	defer func() {
+		if s == nil && port > 0 {
+			removeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = runAdb(removeCtx, adb, "-s", serial, "forward", "--remove", "tcp:"+strconv.Itoa(port))
+		}
+	}()
+	out, err = runAdb(ctx, adb, "-s", serial, "forward", "tcp:0", "localabstract:scrcpy_"+scid)
 	if err != nil {
 		return nil, fmt.Errorf("adb forward: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	port, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	port, err = strconv.Atoi(strings.TrimSpace(string(out)))
 	if err != nil || port == 0 {
 		return nil, fmt.Errorf("adb forward: no port: %s", strings.TrimSpace(string(out)))
 	}
@@ -116,7 +133,7 @@ func start(ctx context.Context, serial string) (*Session, error) {
 		_ = errLog.Close()
 		return nil, fmt.Errorf("start scrcpy server: %w", err)
 	}
-	s := &Session{Serial: serial, adb: adb, port: port, process: proc, errLog: errLog, errLogPath: errLogPath}
+	s = &Session{Serial: serial, adb: adb, port: port, process: proc, errLog: errLog, errLogPath: errLogPath}
 	video, err := dialVideo(port)
 	if err != nil {
 		serr := s.ServerError()
@@ -152,6 +169,19 @@ func start(ctx context.Context, serial string) (*Session, error) {
 	return s, nil
 }
 
+// needsPush reports whether the device jar should be pushed based on the local
+// server size and the output/error of `adb shell stat -c %s <remote>`.
+func needsPush(localSize int64, statOutput []byte, statErr error) bool {
+	if localSize <= 0 || statErr != nil {
+		return true
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(string(statOutput)), 10, 64)
+	if err != nil || size < 0 {
+		return true
+	}
+	return size != localSize
+}
+
 // Start opens a session against a connected emulator serial.
 func Start(ctx context.Context, serial string) (*Session, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -169,6 +199,12 @@ func Start(ctx context.Context, serial string) (*Session, error) {
 	case r := <-ch:
 		return r.s, r.err
 	case <-ctx.Done():
+		go func() {
+			r := <-ch
+			if r.s != nil {
+				r.s.Close()
+			}
+		}()
 		return nil, fmt.Errorf("scrcpy start timed out: %w", ctx.Err())
 	}
 }
@@ -218,9 +254,11 @@ func (s *Session) Close() {
 	if s.errLog != nil {
 		_ = s.errLog.Close()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, _ = runAdb(ctx, s.adb, "-s", s.Serial, "forward", "--remove", "tcp:"+strconv.Itoa(s.port))
+	if s.port > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = runAdb(ctx, s.adb, "-s", s.Serial, "forward", "--remove", "tcp:"+strconv.Itoa(s.port))
+	}
 }
 
 // ServerError returns the device server's stderr (empty when it never spoke).
