@@ -120,7 +120,7 @@ func start(ctx context.Context, serial string) (*Session, error) {
 		"scid="+scid, "log_level=warn", "tunnel_forward=true",
 		"audio=false", "control=true", "video_codec=h264",
 		"max_size=1280", "max_fps=60", "video_bit_rate=6000000",
-		"clipboard_autosync=false", "power_on=true", "cleanup=true",
+		"clipboard_autosync=true", "power_on=true", "cleanup=true",
 	)
 	// Server stderr is the only witness when the device side dies early.
 	errLog, err := os.CreateTemp("", "sim-go-scrcpy-"+scid+"-*.log")
