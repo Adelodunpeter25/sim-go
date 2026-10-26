@@ -3,6 +3,9 @@ package sdk
 import (
 	"encoding/binary"
 	"testing"
+	"time"
+
+	"github.com/Adelodunpeter25/sim-go/internal/idb"
 )
 
 // scTerminator-prefixed NALs, mirroring what the companion emits.
@@ -214,5 +217,68 @@ func TestAssemblerGroupsSlicesIntoOnePicture(t *testing.T) {
 	tail, _, _ := a.flush()
 	if len(tail) != 1 {
 		t.Fatalf("flush: want 1 picture, got %d", len(tail))
+	}
+}
+
+func TestIOSBackendMultiViewerResetPolicy(t *testing.T) {
+	restartCh := make(chan struct{}, 1)
+	b := &iosBackend{
+		started: time.Now().Add(-10 * time.Second), // past iosRestartGrace
+		restart: restartCh,
+	}
+
+	ss := &session{
+		handles: map[*Stream]struct{}{},
+	}
+	b.ss = ss
+
+	// Scenario 1: 2 active viewers and pipe is alive.
+	// reset() must NOT trigger restart.
+	st1 := &Stream{sess: ss}
+	st2 := &Stream{sess: ss}
+	ss.handles[st1] = struct{}{}
+	ss.handles[st2] = struct{}{}
+	b.vs = idb.NewTestVideoStream(true)
+
+	b.reset()
+	select {
+	case <-restartCh:
+		t.Fatal("reset() triggered restart while multiple active viewers were present")
+	default:
+		// Passed: did not restart.
+	}
+
+	// Scenario 2: Only 1 viewer (no other active viewers) and pipe alive.
+	// reset() SHOULD restart to give the single viewer a fresh keyframe.
+	delete(ss.handles, st2)
+	b.reset()
+	select {
+	case <-restartCh:
+		// Passed: restart triggered.
+	default:
+		t.Fatal("reset() should have triggered restart when only 1 viewer was present")
+	}
+
+	// Scenario 3: Multiple viewers (2), but the video pipe is DEAD.
+	// reset() MUST trigger restart to revive the dead pipe.
+	ss.handles[st2] = struct{}{}
+	b.vs = idb.NewTestVideoStream(false) // dead pipe
+	b.reset()
+	select {
+	case <-restartCh:
+		// Passed: restart triggered for dead pipe.
+	default:
+		t.Fatal("reset() should have triggered restart when the video pipe was dead")
+	}
+
+	// Scenario 4: Multiple viewers, vs is nil (pipe dead).
+	// reset() MUST trigger restart.
+	b.vs = nil
+	b.reset()
+	select {
+	case <-restartCh:
+		// Passed: restart triggered.
+	default:
+		t.Fatal("reset() should have triggered restart when vs was nil")
 	}
 }

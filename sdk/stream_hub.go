@@ -248,6 +248,12 @@ func (ss *session) run() {
 	ss.be.pump(ss)
 }
 
+func (ss *session) activeViewers() int {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return len(ss.handles)
+}
+
 func (ss *session) meta() StreamMeta {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()

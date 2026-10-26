@@ -76,20 +76,56 @@ func (vs *VideoStream) pump() {
 
 // Stop asks the device to end the stream, then closes locally.
 func (vs *VideoStream) Stop() {
+	if vs == nil {
+		return
+	}
 	vs.once.Do(func() {
-		_ = vs.stream.Send(&gen.VideoStreamRequest{
-			Control: &gen.VideoStreamRequest_Stop_{Stop: &gen.VideoStreamRequest_Stop{}},
-		})
-		_ = vs.stream.CloseSend()
+		if vs.stream != nil {
+			_ = vs.stream.Send(&gen.VideoStreamRequest{
+				Control: &gen.VideoStreamRequest_Stop_{Stop: &gen.VideoStreamRequest_Stop{}},
+			})
+			_ = vs.stream.CloseSend()
+		}
 	})
 	vs.Close()
 }
 
+// Alive reports whether the video stream is actively running.
+func (vs *VideoStream) Alive() bool {
+	if vs == nil {
+		return false
+	}
+	select {
+	case <-vs.done:
+		return false
+	default:
+		return true
+	}
+}
+
+// NewTestVideoStream returns a VideoStream for testing with a controllable done channel.
+func NewTestVideoStream(alive bool) *VideoStream {
+	done := make(chan struct{})
+	if !alive {
+		close(done)
+	}
+	return &VideoStream{done: done}
+}
+
 // Close releases locally without asking (idempotent).
 func (vs *VideoStream) Close() {
-	vs.once.Do(func() { _ = vs.stream.CloseSend() })
+	if vs == nil {
+		return
+	}
+	vs.once.Do(func() {
+		if vs.stream != nil {
+			_ = vs.stream.CloseSend()
+		}
+	})
 	if vs.stop != nil {
 		vs.stop()
 	}
-	<-vs.done
+	if vs.done != nil {
+		<-vs.done
+	}
 }

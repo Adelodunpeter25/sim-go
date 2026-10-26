@@ -237,6 +237,10 @@ type iosBackend struct {
 	started time.Time
 	touch   iosTouch
 	restart chan struct{} // buffered(1): reopen the video pipe
+
+	mu sync.Mutex
+	ss *session
+	vs *idb.VideoStream
 }
 
 func openIOS(ctx context.Context, udid string) (backend, error) {
@@ -257,28 +261,65 @@ func (b *iosBackend) info() (int, int, string) {
 }
 
 // pump reads the companion's H.264 pipe, reassembles pictures, and publishes
-// them. A restart request reopens the pipe so a late joiner gets SPS/PPS+IDR.
+// them. A restart request reopens the pipe if dead or no active viewers.
 func (b *iosBackend) pump(ss *session) {
+	b.mu.Lock()
+	b.ss = ss
+	b.mu.Unlock()
+
 	vs, err := b.ib.StartVideo(iosFps, iosScale)
 	if err != nil {
 		return
 	}
-	// vs is reassigned on restart, so the final stop needs the closure.
-	defer func() { vs.Stop() }()
+	b.mu.Lock()
+	b.vs = vs
+	b.mu.Unlock()
+	// vs is reassigned on restart, so stop whatever is currently active.
+	defer func() {
+		b.mu.Lock()
+		cur := b.vs
+		b.vs = nil
+		b.mu.Unlock()
+		if cur != nil {
+			cur.Stop()
+		}
+	}()
 	asm := &iosAssembler{}
 	for {
 		select {
 		case <-ss.done:
 			return
 		case <-b.restart:
+			// Do NOT stop the running vs if there are already active viewers enjoying the stream.
+			// Only restart the video pipe if the pipe is dead or has no active viewers.
+			if b.hasActiveViewers() && b.isPipeAlive() {
+				continue
+			}
 			vs.Stop()
 			if vs, err = b.ib.StartVideo(iosFps, iosScale); err != nil {
 				return
 			}
+			b.mu.Lock()
+			b.vs = vs
+			b.mu.Unlock()
 			asm = &iosAssembler{}
 		case chunk, ok := <-vs.Frames:
 			if !ok {
-				return
+				select {
+				case <-ss.done:
+					return
+				default:
+				}
+				// The pipe died while the session is still active; try to reopen it.
+				vs.Stop()
+				if vs, err = b.ib.StartVideo(iosFps, iosScale); err != nil {
+					return
+				}
+				b.mu.Lock()
+				b.vs = vs
+				b.mu.Unlock()
+				asm = &iosAssembler{}
+				continue
 			}
 			aus, desc, codec := asm.push(chunk)
 			if desc != nil {
@@ -293,16 +334,40 @@ func (b *iosBackend) pump(ss *session) {
 	}
 }
 
-// reset asks pump to reopen the video pipe. A session that just started is
-// left alone: its first keyframe is already on the way.
+// reset asks pump to reopen the video pipe if dead or no active viewers.
+// A session that just started is left alone: its first keyframe is already on the way.
+// If active viewers are already watching the stream, the pipe is not interrupted.
 func (b *iosBackend) reset() {
 	if time.Since(b.started) < iosRestartGrace {
+		return
+	}
+	if b.hasActiveViewers() && b.isPipeAlive() {
 		return
 	}
 	select {
 	case b.restart <- struct{}{}:
 	default: // one pending restart is enough
 	}
+}
+
+func (b *iosBackend) hasActiveViewers() bool {
+	b.mu.Lock()
+	ss := b.ss
+	b.mu.Unlock()
+	if ss == nil {
+		return false
+	}
+	return ss.activeViewers() > 1
+}
+
+func (b *iosBackend) isPipeAlive() bool {
+	b.mu.Lock()
+	vs := b.vs
+	b.mu.Unlock()
+	if vs == nil {
+		return false
+	}
+	return vs.Alive()
 }
 
 func (b *iosBackend) close() { b.lease.Release() }

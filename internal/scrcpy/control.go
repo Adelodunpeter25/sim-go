@@ -148,6 +148,9 @@ func (s *Session) Text(text string) error {
 }
 
 // ResetVideo asks the encoder for fresh config + key frame (for late joiners).
+// Note: scrcpy v2.7 does not support a separate reset-video control message;
+// late joiners receive the cached SPS/PPS description from session and await
+// the next key frame. Sending an invalid control byte aborts scrcpy-server.
 func (s *Session) ResetVideo() error {
-	return s.sendControl([]byte{msgResetVideo})
+	return nil
 }

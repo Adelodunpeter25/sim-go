@@ -271,3 +271,85 @@ func TestConcurrentAttachDetach(t *testing.T) {
 }
 
 func (s *Stream) publishNoop() { s.sess.publishFrame(false, []byte{1}) }
+
+func TestSlowViewerDropsDeltasAndRecoversOnKeyFrame(t *testing.T) {
+	var starts int32
+	h := testHub(newFake(), &starts)
+	st := attach(t, h, "android", "emulator-5554")
+	defer st.Close()
+
+	// Fill the buffer completely with delta frames.
+	for i := 0; i < packetBuffer; i++ {
+		st.sess.publishFrame(false, []byte{byte(i)})
+	}
+
+	// Push 10 more delta frames: these should be dropped, viewer must NOT be detached.
+	for i := 0; i < 10; i++ {
+		st.sess.publishFrame(false, []byte{99})
+	}
+
+	if st.Err() != nil {
+		t.Fatalf("viewer prematurely dropped: %v", st.Err())
+	}
+
+	// Now consumer reads some packets to clear congestion.
+	for i := 0; i < packetBuffer/2+10; i++ {
+		<-st.ch
+	}
+
+	// Push a keyframe: should clear dropping state and reset drops.
+	st.sess.publishFrame(true, []byte{0xaa})
+
+	// Verify keyframe was delivered.
+	var sawKey bool
+	for len(st.ch) > 0 {
+		p := <-st.ch
+		if p.Kind == PacketKeyFrame {
+			sawKey = true
+			break
+		}
+	}
+	if !sawKey {
+		t.Fatal("keyframe was not delivered after recovery")
+	}
+	if st.Err() != nil {
+		t.Fatalf("unexpected stream error: %v", st.Err())
+	}
+}
+
+func TestCriticalPacketsMakeRoom(t *testing.T) {
+	var starts int32
+	h := testHub(newFake(), &starts)
+	st := attach(t, h, "android", "emulator-5554")
+	defer st.Close()
+
+	// Fill buffer completely.
+	for i := 0; i < packetBuffer; i++ {
+		st.sess.publishFrame(false, []byte{1})
+	}
+
+	if len(st.ch) != packetBuffer {
+		t.Fatalf("channel len = %d, want %d", len(st.ch), packetBuffer)
+	}
+
+	// Publish description (critical) while channel is full.
+	// It should make room and succeed without detaching the viewer.
+	st.sess.publishDesc([]byte{0x42}, "avc1.test")
+
+	if st.Err() != nil {
+		t.Fatalf("viewer dropped on critical packet: %v", st.Err())
+	}
+
+	// Verify description was received.
+	var sawDesc bool
+	for len(st.ch) > 0 {
+		p := <-st.ch
+		if p.Kind == PacketDescription && len(p.Data) > 0 && p.Data[0] == 0x42 {
+			sawDesc = true
+			break
+		}
+	}
+	if !sawDesc {
+		t.Fatal("description was not delivered")
+	}
+}

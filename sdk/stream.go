@@ -90,18 +90,23 @@ func (t *tagged) Error() string        { return t.err.Error() }
 func (t *tagged) Unwrap() error        { return t.err }
 func (t *tagged) Is(target error) bool { return target == t.kind }
 
-// packetBuffer is how many packets a viewer may lag behind (~2s at 60fps)
-// before it is dropped. The encoder side never blocks on a viewer.
-const packetBuffer = 120
+// packetBuffer is how many packets a viewer may buffer (~4s at 60fps, ~8s at 30fps)
+// before congestion handling kicks in.
+const packetBuffer = 240
+
+// maxDrops is how many consecutive frames a congested viewer may drop before being disconnected.
+const maxDrops = 240
 
 // Stream is one viewer's handle on a shared device session.
 type Stream struct {
 	sess *session
 	ch   chan Packet
 
-	mu     sync.Mutex
-	closed bool
-	err    error
+	mu       sync.Mutex
+	closed   bool
+	err      error
+	dropping bool
+	drops    int
 }
 
 // Meta returns the current stream description.
@@ -160,21 +165,84 @@ func (s *Stream) Close() error {
 	return nil
 }
 
-// push delivers without ever blocking: a full channel drops this viewer.
+// push delivers without ever blocking: drops deltas during congestion, and only
+// drops the viewer if it remains completely stalled.
 func (s *Stream) push(p Packet) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return
 	}
+
+	// If the viewer has drained the buffer below half, clear the drop counter.
+	if len(s.ch) < packetBuffer/2 {
+		s.drops = 0
+	}
+
+	// While in dropping mode, continue dropping delta frames until a keyframe arrives.
+	if s.dropping && p.Kind == PacketDelta {
+		s.drops++
+		if s.drops >= maxDrops {
+			s.mu.Unlock()
+			s.sess.detach(s, ErrSlowViewer)
+			return
+		}
+		s.mu.Unlock()
+		return
+	}
+
 	select {
 	case s.ch <- p:
+		if p.Kind == PacketKeyFrame {
+			s.dropping = false
+			s.drops = 0
+		}
 		s.mu.Unlock()
 		return
 	default:
 	}
+
+	// Channel is full.
+	if p.Kind == PacketDelta {
+		s.drops++
+		wasDropping := s.dropping
+		s.dropping = true
+		if s.drops >= maxDrops {
+			s.mu.Unlock()
+			s.sess.detach(s, ErrSlowViewer)
+			return
+		}
+		s.mu.Unlock()
+		if !wasDropping {
+			s.sess.be.reset()
+		}
+		return
+	}
+
+	// For critical packets (Meta, Description, KeyFrame), make room by dropping
+	// the oldest packet from the queue.
+	select {
+	case <-s.ch:
+	default:
+	}
+	select {
+	case s.ch <- p:
+		if p.Kind == PacketKeyFrame {
+			s.dropping = false
+			s.drops = 0
+		}
+		s.mu.Unlock()
+		return
+	default:
+	}
+
+	s.drops++
+	if s.drops >= maxDrops {
+		s.mu.Unlock()
+		s.sess.detach(s, ErrSlowViewer)
+		return
+	}
 	s.mu.Unlock()
-	s.sess.detach(s, ErrSlowViewer)
 }
 
 // finish closes the channel exactly once.
