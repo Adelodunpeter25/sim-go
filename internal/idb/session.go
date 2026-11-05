@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	gen "github.com/Adelodunpeter25/sim-go/internal/idb/gen"
@@ -109,8 +108,7 @@ func exited(proc *exec.Cmd) bool {
 	if proc == nil || proc.Process == nil {
 		return true
 	}
-	// Signal 0 probes liveness without delivering anything.
-	return syscall.Kill(proc.Process.Pid, 0) != nil
+	return !processAlive(proc.Process.Pid)
 }
 
 // Close kills the companion. Idempotent.

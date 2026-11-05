@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"syscall"
 
 	"github.com/Adelodunpeter25/sim-go/internal/android"
 	"github.com/Adelodunpeter25/sim-go/internal/idb"
@@ -51,10 +50,9 @@ func (c *Client) Doctor(ctx context.Context) Diagnostics {
 	if android.EmulatorBin() != "" {
 		d.EmulatorAvail = true
 	}
-	var fs syscall.Statfs_t
-	if err := syscall.Statfs(homeOrRoot(), &fs); err == nil {
-		d.DiskFreeBytes = fs.Bavail * uint64(fs.Bsize)
-		d.HasEnoughDiskGB = d.DiskFreeBytes >= 10<<30
+	if free, err := diskFree(homeOrRoot()); err == nil {
+		d.DiskFreeBytes = free
+		d.HasEnoughDiskGB = free >= 10<<30
 	}
 	d.IOSUsable = d.XcodeInstalled && d.SimctlAvailable
 	d.AndroidUsable = d.ADBAvailable
