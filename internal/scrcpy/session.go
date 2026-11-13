@@ -104,6 +104,50 @@ func start(ctx context.Context, serial string, opts Options) (*Session, error) {
 		return nil, fmt.Errorf("stat local scrcpy server: %w", err)
 	}
 	remote := "/data/local/tmp/sim-go-scrcpy-" + Version + ".jar"
+	// scid is parsed as HEX and must fit int32 (see Options.parse):
+	// random 31-bit value, hex-encoded, like the official client.
+	var scidBytes [4]byte
+	if _, err := rand.Read(scidBytes[:]); err != nil {
+		return nil, err
+	}
+	scid := strconv.FormatUint(uint64(binary.BigEndian.Uint32(scidBytes[:])&0x7fffffff), 16)
+
+	// The adb forward does not depend on the jar being on the device, so it
+	// runs alongside the stat/push instead of after it.
+	type fwdResult struct {
+		out []byte
+		err error
+	}
+	fwd := make(chan fwdResult, 1)
+	go func() {
+		out, err := runAdb(ctx, adb, "-s", serial, "forward", "tcp:0", "localabstract:scrcpy_"+scid)
+		fwd <- fwdResult{out, err}
+	}()
+	var s *Session
+	var port int
+	var fwdRes fwdResult
+	fwdDone := false
+	waitFwd := func() fwdResult {
+		if !fwdDone {
+			fwdRes, fwdDone = <-fwd, true
+		}
+		return fwdRes
+	}
+	defer func() {
+		// The forward may still be in flight when an early return fires.
+		if s == nil {
+			r := waitFwd()
+			if port == 0 && r.err == nil {
+				port, _ = strconv.Atoi(strings.TrimSpace(string(r.out)))
+			}
+			if port > 0 {
+				removeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_, _ = runAdb(removeCtx, adb, "-s", serial, "forward", "--remove", "tcp:"+strconv.Itoa(port))
+			}
+		}
+	}()
+
 	out, err := runAdb(ctx, adb, "-s", serial, "shell", "stat", "-c", "%s", remote)
 	if needsPush(stat.Size(), out, err) {
 		tmp := remote + ".tmp"
@@ -114,23 +158,8 @@ func start(ctx context.Context, serial string, opts Options) (*Session, error) {
 			return nil, fmt.Errorf("install scrcpy server: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 	}
-	// scid is parsed as HEX and must fit int32 (see Options.parse):
-	// random 31-bit value, hex-encoded, like the official client.
-	var scidBytes [4]byte
-	if _, err := rand.Read(scidBytes[:]); err != nil {
-		return nil, err
-	}
-	scid := strconv.FormatUint(uint64(binary.BigEndian.Uint32(scidBytes[:])&0x7fffffff), 16)
-	var s *Session
-	var port int
-	defer func() {
-		if s == nil && port > 0 {
-			removeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_, _ = runAdb(removeCtx, adb, "-s", serial, "forward", "--remove", "tcp:"+strconv.Itoa(port))
-		}
-	}()
-	out, err = runAdb(ctx, adb, "-s", serial, "forward", "tcp:0", "localabstract:scrcpy_"+scid)
+	r := waitFwd()
+	out, err = r.out, r.err
 	if err != nil {
 		return nil, fmt.Errorf("adb forward: %w: %s", err, strings.TrimSpace(string(out)))
 	}

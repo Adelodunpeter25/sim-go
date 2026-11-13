@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strconv"
 	"sync"
+	"time"
 )
 
 // Live streaming: H.264 (AVCC) out, input events in, one shared backend
@@ -98,6 +99,9 @@ type Packet struct {
 	Kind PacketKind
 	Meta StreamMeta // PacketMeta only
 	Data []byte     // every other kind
+	// At is when the session received the picture from the device. Zero on
+	// non-picture packets and on packets replayed to a late joiner.
+	At time.Time
 }
 
 // Input is one control event from a viewer. The JSON shape is the viewer

@@ -392,3 +392,32 @@ func TestSetSizeIsBroadcastInMeta(t *testing.T) {
 		t.Fatalf("meta after rotation = %+v", p)
 	}
 }
+
+func TestPictureCarriesCaptureTimeAndReplayDoesNot(t *testing.T) {
+	var starts int32
+	h := testHub(newFake(), &starts)
+	first := attach(t, h, "android", "emulator-5554")
+	defer first.Close()
+	first.sess.publishDesc([]byte{7}, "avc1.64")
+	first.sess.publishFrame(true, []byte{1})
+	for {
+		p := recv(t, first)
+		if p.Kind == PacketKeyFrame {
+			if p.At.IsZero() {
+				t.Fatal("live picture has no capture time")
+			}
+			break
+		}
+	}
+	late := attach(t, h, "android", "emulator-5554")
+	defer late.Close()
+	for {
+		p := recv(t, late)
+		if p.Kind == PacketKeyFrame {
+			if !p.At.IsZero() {
+				t.Fatal("replayed picture must not carry a capture time")
+			}
+			return
+		}
+	}
+}

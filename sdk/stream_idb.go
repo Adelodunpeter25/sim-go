@@ -50,7 +50,13 @@ type iosAU struct {
 }
 
 func (au iosAU) avcc() []byte {
-	var out []byte
+	n := 0
+	for _, nal := range au.nals {
+		if len(nal) > 0 {
+			n += 4 + len(nal)
+		}
+	}
+	out := make([]byte, 0, n)
 	var hdr [4]byte
 	for _, nal := range au.nals {
 		if len(nal) == 0 {
@@ -88,23 +94,33 @@ type iosAssembler struct {
 // back until the following chunk proves its end. In live video the next frame
 // always arrives; at end of stream call flush.
 func (a *iosAssembler) push(chunk []byte) (aus []iosAU, desc []byte, codec string) {
-	b := append(a.buf, chunk...)
+	// Nothing carried over: scan the chunk in place. The cap is clamped so a
+	// later append can never write into memory the caller still owns.
+	b := chunk[:len(chunk):len(chunk)]
+	if len(a.buf) > 0 {
+		b = append(a.buf, chunk...)
+	}
 	nalStart := -1
 	if a.open {
 		nalStart = 0
 	}
 	var spans [][2]int
-	for i := 0; i+2 < len(b); {
-		n, ok := startCodeLen(b, i)
-		if !ok {
-			i++
-			continue
+	for pos := 0; ; {
+		j := bytes.Index(b[pos:], startCode3)
+		if j < 0 {
+			break
+		}
+		i, n := pos+j, 3
+		// A leading zero_byte makes it a 4-byte start code, unless that
+		// zero already belongs to the previous start code.
+		if i > 0 && b[i-1] == 0 && (nalStart < 0 || i-1 >= nalStart) {
+			i, n = i-1, 4
 		}
 		if nalStart >= 0 && i > nalStart {
 			spans = append(spans, [2]int{nalStart, i})
 		}
 		nalStart = i + n
-		i = nalStart
+		pos = nalStart
 	}
 	for _, span := range spans {
 		nal := b[span[0]:span[1]]
@@ -147,7 +163,7 @@ func (a *iosAssembler) push(chunk []byte) (aus []iosAU, desc []byte, codec strin
 		a.pending = a.pending[len(a.pending)-32:]
 	}
 	if nalStart >= 0 {
-		a.buf = b[nalStart:]
+		a.buf = b[nalStart:len(b):len(b)]
 		a.open = true
 	} else {
 		// No start code in sight: between NALs this is junk, but a start code
@@ -161,6 +177,8 @@ func (a *iosAssembler) push(chunk []byte) (aus []iosAU, desc []byte, codec strin
 	}
 	return aus, desc, codec
 }
+
+var startCode3 = []byte{0, 0, 1}
 
 // startCodeLen reports the length of the Annex-B start code at b[i], if any.
 func startCodeLen(b []byte, i int) (int, bool) {

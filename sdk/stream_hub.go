@@ -207,6 +207,7 @@ func (h *streamHub) closeSession(ss *session) {
 		handles = append(handles, st)
 	}
 	ss.handles = map[*Stream]struct{}{}
+	ss.snap = nil
 	if ss.idle != nil {
 		ss.idle.Stop()
 		ss.idle = nil
@@ -250,8 +251,12 @@ type session struct {
 	desc    []byte
 	gop     []Packet // last key frame + deltas since, replayed to late joiners
 	handles map[*Stream]struct{}
-	idle    *time.Timer
-	closed  bool
+	// snap is the viewer list as a slice, rebuilt only when a viewer joins
+	// or leaves, so broadcast does not allocate per frame. Never mutated
+	// after it is published.
+	snap   []*Stream
+	idle   *time.Timer
+	closed bool
 }
 
 func (ss *session) run() {
@@ -292,11 +297,13 @@ func (ss *session) attach() *Stream {
 	if late {
 		st.ch <- Packet{Kind: PacketDescription, Data: ss.desc}
 		for _, p := range ss.gop {
+			p.At = time.Time{} // replayed: its age says nothing about live latency
 			st.ch <- p
 			replayed = true
 		}
 	}
 	ss.handles[st] = struct{}{}
+	ss.resnapLocked()
 	if ss.idle != nil {
 		ss.idle.Stop()
 		ss.idle = nil
@@ -315,6 +322,9 @@ func (ss *session) detach(st *Stream, err error) {
 	ss.mu.Lock()
 	_, was := ss.handles[st]
 	delete(ss.handles, st)
+	if was {
+		ss.resnapLocked()
+	}
 	if was && len(ss.handles) == 0 && ss.idle == nil && !ss.closed {
 		ss.idle = time.AfterFunc(ss.hub.idle, func() { ss.hub.closeIfIdle(ss) })
 	}
@@ -348,7 +358,7 @@ func (ss *session) publishFrame(key bool, avcc []byte) {
 	if key {
 		kind = PacketKeyFrame
 	}
-	p := Packet{Kind: kind, Data: avcc}
+	p := Packet{Kind: kind, Data: avcc, At: time.Now()}
 	ss.mu.Lock()
 	switch {
 	case key:
@@ -364,12 +374,18 @@ func (ss *session) publishFrame(key bool, avcc []byte) {
 	ss.broadcast(p)
 }
 
+// resnapLocked rebuilds snap from handles. ss.mu held.
+func (ss *session) resnapLocked() {
+	snap := make([]*Stream, 0, len(ss.handles))
+	for st := range ss.handles {
+		snap = append(snap, st)
+	}
+	ss.snap = snap
+}
+
 func (ss *session) broadcast(p Packet) {
 	ss.mu.Lock()
-	handles := make([]*Stream, 0, len(ss.handles))
-	for st := range ss.handles {
-		handles = append(handles, st)
-	}
+	handles := ss.snap
 	ss.mu.Unlock()
 	for _, st := range handles {
 		st.push(p)
