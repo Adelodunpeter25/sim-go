@@ -353,3 +353,26 @@ func TestCriticalPacketsMakeRoom(t *testing.T) {
 		t.Fatal("description was not delivered")
 	}
 }
+
+func TestLateJoinerReplaysCachedGOPWithoutReset(t *testing.T) {
+	var starts int32
+	be := newFake()
+	h := testHub(be, &starts)
+	first := attach(t, h, "android", "emulator-5554")
+	defer first.Close()
+	first.sess.publishDesc([]byte{7}, "avc1.64")
+	first.sess.publishFrame(true, []byte{1})
+	first.sess.publishFrame(false, []byte{2})
+
+	late := attach(t, h, "android", "emulator-5554")
+	defer late.Close()
+	kinds := []PacketKind{PacketMeta, PacketDescription, PacketKeyFrame, PacketDelta}
+	for _, want := range kinds {
+		if p := recv(t, late); p.Kind != want {
+			t.Fatalf("got kind %d want %d", p.Kind, want)
+		}
+	}
+	if n := atomic.LoadInt32(&be.resets); n != 0 {
+		t.Fatalf("resets=%d want 0 when a GOP was replayed", n)
+	}
+}

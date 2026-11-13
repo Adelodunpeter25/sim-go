@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// maxReplay caps the cached GOP so meta + description + replay always fit
+// in a viewer's queue.
+const maxReplay = packetBuffer - 4
+
 // streamIdle is how long a session with no viewers stays up.
 const streamIdle = 30 * time.Second
 
@@ -238,6 +242,7 @@ type session struct {
 	mu      sync.Mutex
 	codec   string
 	desc    []byte
+	gop     []Packet // last key frame + deltas since, replayed to late joiners
 	handles map[*Stream]struct{}
 	idle    *time.Timer
 	closed  bool
@@ -277,8 +282,13 @@ func (ss *session) attach() *Stream {
 	}
 	st.ch <- Packet{Kind: PacketMeta, Meta: ss.metaLocked()}
 	late := len(ss.desc) > 0
+	replayed := false
 	if late {
 		st.ch <- Packet{Kind: PacketDescription, Data: ss.desc}
+		for _, p := range ss.gop {
+			st.ch <- p
+			replayed = true
+		}
 	}
 	ss.handles[st] = struct{}{}
 	if ss.idle != nil {
@@ -286,7 +296,7 @@ func (ss *session) attach() *Stream {
 		ss.idle = nil
 	}
 	ss.mu.Unlock()
-	if late {
+	if late && !replayed {
 		// scrcpy re-syncs its encoder in place; idb only emits SPS/PPS+IDR
 		// on a fresh video pipe.
 		ss.be.reset()
@@ -311,6 +321,7 @@ func (ss *session) detach(st *Stream, err error) {
 func (ss *session) publishDesc(desc []byte, codec string) {
 	ss.mu.Lock()
 	ss.desc, ss.codec = desc, codec
+	ss.gop = nil // pictures cached under the old config are undecodable
 	meta := ss.metaLocked()
 	ss.mu.Unlock()
 	ss.broadcast(Packet{Kind: PacketDescription, Data: desc})
@@ -323,7 +334,20 @@ func (ss *session) publishFrame(key bool, avcc []byte) {
 	if key {
 		kind = PacketKeyFrame
 	}
-	ss.broadcast(Packet{Kind: kind, Data: avcc})
+	p := Packet{Kind: kind, Data: avcc}
+	ss.mu.Lock()
+	switch {
+	case key:
+		ss.gop = append(ss.gop[:0:0], p)
+	case len(ss.gop) > 0 && len(ss.gop) < maxReplay:
+		ss.gop = append(ss.gop, p)
+	default:
+		// GOP too long to replay inside a viewer's queue: late joiners
+		// fall back to asking the backend for a fresh key frame.
+		ss.gop = nil
+	}
+	ss.mu.Unlock()
+	ss.broadcast(p)
 }
 
 func (ss *session) broadcast(p Packet) {

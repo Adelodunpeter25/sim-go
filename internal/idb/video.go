@@ -16,6 +16,7 @@ type VideoStream struct {
 	stream gen.CompanionService_VideoStreamClient
 	frames chan []byte
 	stop   context.CancelFunc
+	ctx    context.Context
 	done   chan struct{}
 	once   sync.Once
 }
@@ -38,6 +39,7 @@ func (s *Session) StartVideo(fps uint64, scale float64) (*VideoStream, error) {
 	vs := &VideoStream{stream: stream, frames: make(chan []byte, 32), done: make(chan struct{})}
 	vs.Frames = vs.frames
 	vs.stop = cancel
+	vs.ctx = ctx
 	if err := stream.Send(&gen.VideoStreamRequest{
 		Control: &gen.VideoStreamRequest_Start_{Start: &gen.VideoStreamRequest_Start{
 			Format:      gen.VideoStreamRequest_H264,
@@ -66,10 +68,14 @@ func (vs *VideoStream) pump() {
 		if len(data) == 0 {
 			continue // log_output or empty heartbeat
 		}
+		// Chunks are slices of one Annex-B byte stream; dropping one tears a
+		// NAL apart and smears the picture until the next key frame. The
+		// consumer never blocks (viewers drop whole pictures), so waiting
+		// here only backpressures the companion.
 		select {
 		case vs.frames <- data:
-		default:
-			// Slow viewer: drop, never block the device pipe.
+		case <-vs.ctx.Done():
+			return
 		}
 	}
 }
