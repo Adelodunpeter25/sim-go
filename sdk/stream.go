@@ -30,7 +30,7 @@ const (
 )
 
 // StreamQuality tunes the encoder when a session starts. Zero fields keep
-// the defaults (Android 1280px/60fps/6Mbps, iOS native/30fps).
+// the defaults (4 Mbps; Android 1280px/60fps, iOS native/30fps).
 type StreamQuality struct {
 	MaxSize int     // Android: longest edge in pixels
 	MaxFPS  int     // frames per second
@@ -44,6 +44,16 @@ func (q StreamQuality) iosFPS() uint64 {
 	}
 	return iosFps
 }
+
+func (q StreamQuality) iosBitRate() int {
+	if q.BitRate > 0 {
+		return q.BitRate
+	}
+	return defaultBitRate
+}
+
+// defaultBitRate is the encoder target when the viewer does not choose one.
+const defaultBitRate = 4_000_000
 
 func (q StreamQuality) iosScale() float64 {
 	if q.Scale > 0 {

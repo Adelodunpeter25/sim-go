@@ -87,7 +87,7 @@ func (o Options) withDefaults() Options {
 		o.MaxFPS = 60
 	}
 	if o.BitRate <= 0 {
-		o.BitRate = 6_000_000
+		o.BitRate = 4_000_000
 	}
 	return o
 }

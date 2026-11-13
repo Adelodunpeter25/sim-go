@@ -260,7 +260,7 @@ func openIOS(ctx context.Context, udid string, q StreamQuality) (backend, error)
 	return &iosBackend{
 		lease: lease, ib: lease.Session,
 		started: time.Now(), restart: make(chan struct{}, 1),
-		fps: q.iosFPS(), scale: q.iosScale(), bitrate: q.BitRate,
+		fps: q.iosFPS(), scale: q.iosScale(), bitrate: q.iosBitRate(),
 	}, nil
 }
 
