@@ -378,3 +378,17 @@ func TestLateJoinerReplaysCachedGOPWithoutReset(t *testing.T) {
 		t.Fatalf("resets=%d want 0 when a GOP was replayed", n)
 	}
 }
+
+func TestSetSizeIsBroadcastInMeta(t *testing.T) {
+	var starts int32
+	h := testHub(newFake(), &starts)
+	st := attach(t, h, "android", "emulator-5554")
+	defer st.Close()
+	recv(t, st) // initial meta
+	st.sess.setSize(2400, 1080)
+	st.sess.publishDesc([]byte{7}, "avc1.64")
+	recv(t, st) // description
+	if p := recv(t, st); p.Kind != PacketMeta || p.Meta.Width != 2400 || p.Meta.Height != 1080 {
+		t.Fatalf("meta after rotation = %+v", p)
+	}
+}

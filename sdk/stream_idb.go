@@ -236,6 +236,8 @@ type iosBackend struct {
 	ib      *idb.Session
 	started time.Time
 	touch   iosTouch
+	liveMu  sync.Mutex
+	live    *idb.TouchStream
 
 	scrollMu      sync.Mutex
 	scrollPending *Input
@@ -398,21 +400,7 @@ func (b *iosBackend) input(in Input) error {
 	switch in.Type {
 	case "touch":
 		x, y := toPoint(in.X, in.Y)
-		switch strings.ToLower(in.Action) {
-		case "down":
-			b.touch.mu.Lock()
-			b.touch.active, b.touch.startX, b.touch.startY = true, x, y
-			b.touch.mu.Unlock()
-		case "up":
-			g := releaseGesture(&b.touch, x, y)
-			return b.do(func(ctx context.Context) error {
-				if g.swipe {
-					return b.ib.Swipe(ctx, g.x1, g.y1, g.x2, g.y2, g.duration)
-				}
-				return b.ib.Tap(ctx, g.x1, g.y1)
-			})
-		}
-		return nil
+		return b.touchInput(strings.ToLower(in.Action), x, y)
 	case "scroll":
 		// A wheel burst would queue one blocking HID swipe each and stall
 		// every later input. Merge pending deltas; one worker drains them.
@@ -474,6 +462,70 @@ func (b *iosBackend) drainScroll() {
 			return b.ib.Swipe(ctx, x, y, endX, endY, iosSwipeScrollSec)
 		})
 	}
+}
+
+// touchInput drives one finger. A live HID stream gives real down/move/up;
+// if it cannot be opened the press is replayed on release as a tap or swipe.
+func (b *iosBackend) touchInput(action string, x, y float64) error {
+	switch action {
+	case "down":
+		b.endLive(x, y) // a lost "up" must not leave a finger stuck down
+		b.touch.mu.Lock()
+		b.touch.active, b.touch.startX, b.touch.startY = true, x, y
+		b.touch.mu.Unlock()
+		ts, err := b.ib.BeginTouch(x, y)
+		if err != nil {
+			return nil // fallback replays on release
+		}
+		b.liveMu.Lock()
+		b.live = ts
+		b.liveMu.Unlock()
+	case "move":
+		b.liveMu.Lock()
+		ts := b.live
+		b.liveMu.Unlock()
+		if ts != nil {
+			if err := ts.Move(x, y); err != nil {
+				b.dropLive()
+			}
+		}
+	case "up":
+		b.liveMu.Lock()
+		ts := b.live
+		b.live = nil
+		b.liveMu.Unlock()
+		if ts != nil {
+			b.touch.mu.Lock()
+			b.touch.active = false
+			b.touch.mu.Unlock()
+			return ts.End(x, y)
+		}
+		g := releaseGesture(&b.touch, x, y)
+		return b.do(func(ctx context.Context) error {
+			if g.swipe {
+				return b.ib.Swipe(ctx, g.x1, g.y1, g.x2, g.y2, g.duration)
+			}
+			return b.ib.Tap(ctx, g.x1, g.y1)
+		})
+	}
+	return nil
+}
+
+func (b *iosBackend) endLive(x, y float64) {
+	b.liveMu.Lock()
+	ts := b.live
+	b.live = nil
+	b.liveMu.Unlock()
+	if ts != nil {
+		_ = ts.End(x, y)
+	}
+}
+
+// dropLive abandons a broken stream; the rest of the gesture is ignored.
+func (b *iosBackend) dropLive() {
+	b.liveMu.Lock()
+	b.live = nil
+	b.liveMu.Unlock()
 }
 
 // iosTouch keeps the in-flight pointer gesture. iOS HID has no "move" event,

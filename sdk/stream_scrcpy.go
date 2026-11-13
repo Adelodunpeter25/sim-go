@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"github.com/Adelodunpeter25/sim-go/internal/scrcpy"
 )
@@ -15,14 +16,28 @@ var buttonKeycodes = map[string]int{
 }
 
 // androidBackend drives a scrcpy session.
-type androidBackend struct{ sc *scrcpy.Session }
+type androidBackend struct {
+	sc *scrcpy.Session
+	// size is the live stream size packed as w<<32|h. Touch coordinates are
+	// in stream pixels, so a rotation must update it or taps land wrong.
+	size atomic.Uint64
+}
+
+func packSize(w, h int) uint64 { return uint64(w)<<32 | uint64(uint32(h)) }
+
+func (b *androidBackend) streamSize() (int, int) {
+	v := b.size.Load()
+	return int(v >> 32), int(uint32(v))
+}
 
 func openAndroid(ctx context.Context, serial string, q StreamQuality) (backend, error) {
 	sc, err := scrcpy.StartWith(ctx, serial, scrcpy.Options{MaxSize: q.MaxSize, MaxFPS: q.MaxFPS, BitRate: q.BitRate})
 	if err != nil {
 		return nil, err
 	}
-	return &androidBackend{sc: sc}, nil
+	b := &androidBackend{sc: sc}
+	b.size.Store(packSize(sc.Meta.Width, sc.Meta.Height))
+	return b, nil
 }
 
 func (b *androidBackend) info() (int, int, string) {
@@ -55,6 +70,12 @@ func (b *androidBackend) pump(ss *session) {
 			if err != nil {
 				continue
 			}
+			if w, h, err := scrcpy.SPSSize(sps); err == nil {
+				if cw, ch := b.streamSize(); cw != w || ch != h {
+					b.size.Store(packSize(w, h))
+					ss.setSize(w, h)
+				}
+			}
 			ss.publishDesc(desc, codec)
 			continue
 		}
@@ -67,7 +88,7 @@ func (b *androidBackend) pump(ss *session) {
 }
 
 func (b *androidBackend) input(in Input) error {
-	w, h := b.sc.Meta.Width, b.sc.Meta.Height
+	w, h := b.streamSize()
 	switch in.Type {
 	case "touch":
 		action := scrcpy.TouchMove

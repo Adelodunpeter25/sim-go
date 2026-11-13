@@ -135,3 +135,58 @@ func (s *Session) Text(ctx context.Context, text string) error {
 	}
 	return err
 }
+
+// TouchStream is one finger held down over a single HID stream. idb has no
+// move event: repeating DOWN at a new point while the finger is pressed
+// drags it (verified against a live simulator), and UP lifts it.
+type TouchStream struct {
+	stream gen.CompanionService_HidClient
+	cancel context.CancelFunc
+}
+
+// touchMaxHold releases a finger whose viewer vanished mid-press.
+const touchMaxHold = 30 * time.Second
+
+// BeginTouch presses at (x, y) in device points.
+func (s *Session) BeginTouch(x, y float64) (*TouchStream, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), touchMaxHold)
+	stream, err := s.client.Hid(ctx)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("idb hid: %w", err)
+	}
+	t := &TouchStream{stream: stream, cancel: cancel}
+	if err := t.send(gen.HIDEvent_DOWN, x, y); err != nil {
+		cancel()
+		return nil, err
+	}
+	return t, nil
+}
+
+// Move drags the held finger to (x, y).
+func (t *TouchStream) Move(x, y float64) error { return t.send(gen.HIDEvent_DOWN, x, y) }
+
+// End lifts the finger at (x, y) and closes the stream.
+func (t *TouchStream) End(x, y float64) error {
+	defer t.cancel()
+	if err := t.send(gen.HIDEvent_UP, x, y); err != nil {
+		return err
+	}
+	if _, err := t.stream.CloseAndRecv(); err != nil {
+		return fmt.Errorf("idb hid: %w", err)
+	}
+	return nil
+}
+
+func (t *TouchStream) send(dir gen.HIDEvent_HIDDirection, x, y float64) error {
+	err := t.stream.Send(&gen.HIDEvent{Event: &gen.HIDEvent_Press{Press: &gen.HIDEvent_HIDPress{
+		Action: &gen.HIDEvent_HIDPressAction{Action: &gen.HIDEvent_HIDPressAction_Touch{
+			Touch: &gen.HIDEvent_HIDTouch{Point: &gen.Point{X: x, Y: y}},
+		}},
+		Direction: dir,
+	}}})
+	if err != nil {
+		return fmt.Errorf("idb hid send: %w", err)
+	}
+	return nil
+}

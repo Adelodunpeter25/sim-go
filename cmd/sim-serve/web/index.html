@@ -206,7 +206,10 @@ function ensureDecoder(codec, desc) {
 
 function onBinary(buf) {
   const tag = buf[0], payload = buf.slice(1);
-  if (tag === 1) { pendingDesc = payload; return; } // description; decode starts on first keyframe
+  if (tag === 1) {
+    if (pendingDesc && decoder && pendingDesc.length === payload.length && pendingDesc.every((v, i) => v === payload[i])) return;
+    pendingDesc = payload; closeDecoder(); return;
+  } // description; decode starts on first keyframe
   if (!decoder && !(pendingCodec && pendingDesc)) return; // config not complete yet
   if (!ensureDecoder(pendingCodec, pendingDesc)) return;
   // WebCodecs requires the first chunk after configure() to be a keyframe.
@@ -272,7 +275,7 @@ canvas.addEventListener('pointerdown', e => {
   send({ type: 'touch', action: 'down', x: p.x, y: p.y });
 });
 canvas.addEventListener('pointermove', e => {
-  if (!down || !ws) return;
+  if (!down || !ws || ws.bufferedAmount > 16384) return;
   const p = toStream(e);
   send({ type: 'touch', action: 'move', x: p.x, y: p.y });
 });

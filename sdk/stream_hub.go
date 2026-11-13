@@ -322,6 +322,14 @@ func (ss *session) detach(st *Stream, err error) {
 	st.finish(err)
 }
 
+// setSize records a new video size (device rotation); the meta that
+// publishDesc broadcasts next carries it.
+func (ss *session) setSize(w, h int) {
+	ss.mu.Lock()
+	ss.width, ss.height = w, h
+	ss.mu.Unlock()
+}
+
 // publishDesc records a new avcC and tells everyone, then re-announces meta
 // so viewers learn the codec.
 func (ss *session) publishDesc(desc []byte, codec string) {
