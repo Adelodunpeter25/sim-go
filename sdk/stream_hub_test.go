@@ -132,7 +132,7 @@ func TestSlowViewerDroppedWithoutBlocking(t *testing.T) {
 	fast := attach(t, h, "android", "emulator-5554")
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < packetBuffer*3; i++ {
+		for i := 0; i < maxDrops+packetBuffer*2; i++ {
 			slow.sess.publishFrame(false, []byte{1})
 			for len(fast.ch) > 0 {
 				<-fast.ch
@@ -293,7 +293,7 @@ func TestSlowViewerDropsDeltasAndRecoversOnKeyFrame(t *testing.T) {
 	}
 
 	// Now consumer reads some packets to clear congestion.
-	for i := 0; i < packetBuffer/2+10; i++ {
+	for len(st.ch) > 0 {
 		<-st.ch
 	}
 
@@ -323,8 +323,8 @@ func TestCriticalPacketsMakeRoom(t *testing.T) {
 	st := attach(t, h, "android", "emulator-5554")
 	defer st.Close()
 
-	// Fill buffer completely.
-	for i := 0; i < packetBuffer; i++ {
+	// Fill buffer completely (attach already queued the meta packet).
+	for len(st.ch) < packetBuffer {
 		st.sess.publishFrame(false, []byte{1})
 	}
 

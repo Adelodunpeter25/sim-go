@@ -90,12 +90,13 @@ func (t *tagged) Error() string        { return t.err.Error() }
 func (t *tagged) Unwrap() error        { return t.err }
 func (t *tagged) Is(target error) bool { return target == t.kind }
 
-// packetBuffer is how many packets a viewer may buffer (~4s at 60fps, ~8s at 30fps)
-// before congestion handling kicks in.
-const packetBuffer = 240
+// packetBuffer is how many packets a viewer may buffer (~0.5s at 30fps) before
+// congestion handling kicks in. Kept small on purpose: a deeper queue only
+// adds seconds of latency to a screen mirror.
+const packetBuffer = 16
 
 // maxDrops is how many consecutive frames a congested viewer may drop before being disconnected.
-const maxDrops = 240
+const maxDrops = 240 // ~4s of deltas at 60fps without a keyframe getting through
 
 // Stream is one viewer's handle on a shared device session.
 type Stream struct {
@@ -174,8 +175,9 @@ func (s *Stream) push(p Packet) {
 		return
 	}
 
-	// If the viewer has drained the buffer below half, clear the drop counter.
-	if len(s.ch) < packetBuffer/2 {
+	// A healthy viewer that drained below half clears the counter. While
+	// dropping, only a key frame does: a flushed queue is empty by design.
+	if !s.dropping && len(s.ch) < packetBuffer/2 {
 		s.drops = 0
 	}
 
@@ -202,7 +204,9 @@ func (s *Stream) push(p Packet) {
 	default:
 	}
 
-	// Channel is full.
+	// Channel is full: the queued frames are stale. Flush them (keeping the
+	// decoder setup packets) and resync on the next key frame.
+	s.flushFramesLocked()
 	if p.Kind == PacketDelta {
 		s.drops++
 		wasDropping := s.dropping
@@ -219,30 +223,32 @@ func (s *Stream) push(p Packet) {
 		return
 	}
 
-	// For critical packets (Meta, Description, KeyFrame), make room by dropping
-	// the oldest packet from the queue.
-	select {
-	case <-s.ch:
-	default:
-	}
-	select {
-	case s.ch <- p:
-		if p.Kind == PacketKeyFrame {
-			s.dropping = false
-			s.drops = 0
-		}
-		s.mu.Unlock()
-		return
-	default:
-	}
-
-	s.drops++
-	if s.drops >= maxDrops {
-		s.mu.Unlock()
-		s.sess.detach(s, ErrSlowViewer)
-		return
+	s.ch <- p // flushed, so there is room
+	if p.Kind == PacketKeyFrame {
+		s.dropping = false
+		s.drops = 0
 	}
 	s.mu.Unlock()
+}
+
+// flushFramesLocked discards queued pictures but keeps Meta and Description
+// packets, which a decoder needs before it can use any later frame. s.mu held.
+func (s *Stream) flushFramesLocked() {
+	var keep []Packet
+	for {
+		select {
+		case q := <-s.ch:
+			if q.Kind == PacketMeta || q.Kind == PacketDescription {
+				keep = append(keep, q)
+			}
+			continue
+		default:
+		}
+		break
+	}
+	for _, q := range keep {
+		s.ch <- q
+	}
 }
 
 // finish closes the channel exactly once.
