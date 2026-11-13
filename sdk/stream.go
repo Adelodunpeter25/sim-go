@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"errors"
+	"strconv"
 	"sync"
 )
 
@@ -36,6 +37,28 @@ type StreamQuality struct {
 	MaxFPS  int     // frames per second
 	BitRate int     // bits per second
 	Scale   float64 // iOS: 1.0 = native pixels
+}
+
+// ParseQuality reads max_size, max_fps, bitrate (bits/s) and scale (iOS,
+// 0.25-1) through get, e.g. url.Values.Get. Bad or out-of-range values are
+// ignored so a typo never blocks a stream.
+func ParseQuality(get func(string) string) StreamQuality {
+	num := func(key string, lo, hi int) int {
+		n, err := strconv.Atoi(get(key))
+		if err != nil || n < lo || n > hi {
+			return 0
+		}
+		return n
+	}
+	q := StreamQuality{
+		MaxSize: num("max_size", 240, 4096),
+		MaxFPS:  num("max_fps", 5, 60),
+		BitRate: num("bitrate", 200_000, 50_000_000),
+	}
+	if f, err := strconv.ParseFloat(get("scale"), 64); err == nil && f >= 0.25 && f <= 1 {
+		q.Scale = f
+	}
+	return q
 }
 
 func (q StreamQuality) iosFPS() uint64 {

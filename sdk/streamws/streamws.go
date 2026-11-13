@@ -21,7 +21,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/Adelodunpeter25/sim-go/sdk"
@@ -182,22 +181,5 @@ func writeTagged(conn *websocket.Conn, tag byte, data []byte) error {
 	return w.Close()
 }
 
-// QualityFromQuery reads the optional encoder settings. Bad or out-of-range
-// values are ignored so a typo never blocks a stream.
-func QualityFromQuery(q url.Values) sdk.StreamQuality {
-	num := func(key string, lo, hi int) int {
-		n, err := strconv.Atoi(q.Get(key))
-		if err != nil || n < lo || n > hi {
-			return 0
-		}
-		return n
-	}
-	var out sdk.StreamQuality
-	out.MaxSize = num("max_size", 240, 4096)
-	out.MaxFPS = num("max_fps", 5, 60)
-	out.BitRate = num("bitrate", 200_000, 50_000_000)
-	if f, err := strconv.ParseFloat(q.Get("scale"), 64); err == nil && f >= 0.25 && f <= 1 {
-		out.Scale = f
-	}
-	return out
-}
+// QualityFromQuery reads the optional encoder settings from the URL query.
+func QualityFromQuery(q url.Values) sdk.StreamQuality { return sdk.ParseQuality(q.Get) }
