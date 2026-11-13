@@ -155,21 +155,31 @@ func write(conn *websocket.Conn, p sdk.Packet) error {
 		}
 		return conn.WriteMessage(websocket.TextMessage, b)
 	case sdk.PacketDescription:
-		return conn.WriteMessage(websocket.BinaryMessage, tagged(TagDescription, p.Data))
+		return writeTagged(conn, TagDescription, p.Data)
 	case sdk.PacketKeyFrame:
-		return conn.WriteMessage(websocket.BinaryMessage, tagged(TagKeyFrame, p.Data))
+		return writeTagged(conn, TagKeyFrame, p.Data)
 	case sdk.PacketDelta:
-		return conn.WriteMessage(websocket.BinaryMessage, tagged(TagDelta, p.Data))
+		return writeTagged(conn, TagDelta, p.Data)
 	}
 	return nil
 }
 
-// tagged copies once; p.Data is shared between viewers and must not be touched.
-func tagged(tag byte, data []byte) []byte {
-	out := make([]byte, 1+len(data))
-	out[0] = tag
-	copy(out[1:], data)
-	return out
+// writeTagged streams tag + payload without copying: p.Data is shared between
+// viewers and must not be touched.
+func writeTagged(conn *websocket.Conn, tag byte, data []byte) error {
+	w, err := conn.NextWriter(websocket.BinaryMessage)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte{tag}); err != nil {
+		_ = w.Close()
+		return err
+	}
+	if _, err := w.Write(data); err != nil {
+		_ = w.Close()
+		return err
+	}
+	return w.Close()
 }
 
 // QualityFromQuery reads the optional encoder settings. Bad or out-of-range

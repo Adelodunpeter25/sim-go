@@ -1,6 +1,7 @@
 package scrcpy
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -34,6 +35,8 @@ type Session struct {
 	errLog     *os.File
 	errLogPath string
 	video      net.Conn
+	vr         *bufio.Reader // lazily wraps video once the handshake is done
+	head       [frameHeadLen]byte
 	control    net.Conn
 	ctrlMu     sync.Mutex
 	closed     bool

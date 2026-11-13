@@ -1,6 +1,7 @@
 package scrcpy
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -12,41 +13,39 @@ import (
 // Conversion happens once on the server so every viewer stays dumb.
 
 func splitNALs(annexb []byte) [][]byte {
-	var nals [][]byte
+	nals := make([][]byte, 0, 4)
 	start := -1
-	i := 0
-	emit := func(end int) {
+	pos := 0
+	for {
+		j := bytes.Index(annexb[pos:], startCode3)
+		if j < 0 {
+			break
+		}
+		j += pos
+		end := j
+		if end > 0 && annexb[end-1] == 0 { // 4-byte start code
+			end--
+		}
 		if start >= 0 && end > start {
-			if nal := annexb[start:end]; len(nal) > 0 {
-				nals = append(nals, nal)
-			}
+			nals = append(nals, annexb[start:end])
 		}
+		start = j + 3
+		pos = start
 	}
-	for i < len(annexb) {
-		if i+2 < len(annexb) && annexb[i] == 0 && annexb[i+1] == 0 {
-			if annexb[i+2] == 1 {
-				emit(i)
-				i += 3
-				start = i
-				continue
-			}
-			if i+3 < len(annexb) && annexb[i+2] == 0 && annexb[i+3] == 1 {
-				emit(i)
-				i += 4
-				start = i
-				continue
-			}
-		}
-		i++
+	if start >= 0 && len(annexb) > start {
+		nals = append(nals, annexb[start:])
 	}
-	emit(len(annexb))
 	return nals
 }
+
+var startCode3 = []byte{0, 0, 1}
 
 // ToAVCC converts one Annex-B access unit to AVCC. It returns the converted
 // bytes, whether an IDR (type 5) is present, and any SPS/PPS NALs found.
 func ToAVCC(annexb []byte) (avcc []byte, isKey bool, sps, pps []byte) {
-	for _, nal := range splitNALs(annexb) {
+	nals := splitNALs(annexb)
+	avcc = make([]byte, 0, len(annexb)+4*len(nals))
+	for _, nal := range nals {
 		if len(nal) == 0 {
 			continue
 		}

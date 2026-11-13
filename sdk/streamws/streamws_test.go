@@ -51,15 +51,34 @@ func TestPlainGETToValidDeviceIsNotAnUpgrade(t *testing.T) {
 	}
 }
 
-func TestTaggedCopiesAndPrefixes(t *testing.T) {
+func TestWriteTaggedPrefixesWithoutTouchingData(t *testing.T) {
 	src := []byte{9, 8, 7}
-	out := tagged(TagKeyFrame, src)
-	if len(out) != 4 || out[0] != 2 || out[1] != 9 {
+	got := make(chan []byte, 1)
+	up := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := up.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_, msg, _ := c.ReadMessage()
+		got <- msg
+	}))
+	defer srv.Close()
+	c, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := writeTagged(c, TagKeyFrame, src); err != nil {
+		t.Fatal(err)
+	}
+	out := <-got
+	if len(out) != 4 || out[0] != 2 || out[1] != 9 || out[3] != 7 {
 		t.Fatalf("out=%v", out)
 	}
-	out[1] = 0
-	if src[0] != 9 {
-		t.Fatal("tagged must not alias the shared packet data")
+	if src[0] != 9 || src[2] != 7 {
+		t.Fatal("shared packet data was modified")
 	}
 	if TagDescription != 1 || TagKeyFrame != 2 || TagDelta != 3 {
 		t.Fatal("wire tags changed: the page depends on 1/2/3")

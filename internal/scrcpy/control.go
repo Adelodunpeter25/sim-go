@@ -3,7 +3,10 @@ package scrcpy
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 )
+
+const controlWriteWait = 3 * time.Second
 
 // Control message types (scrcpy v2.x wire format; see Version).
 const (
@@ -95,6 +98,8 @@ func EncodeText(text string) []byte {
 func (s *Session) sendControl(msg []byte) error {
 	s.ctrlMu.Lock()
 	defer s.ctrlMu.Unlock()
+	// A stalled adb tunnel must not wedge every later input behind ctrlMu.
+	_ = s.control.SetWriteDeadline(time.Now().Add(controlWriteWait))
 	_, err := s.control.Write(msg)
 	if err != nil {
 		return fmt.Errorf("control write: %w", err)

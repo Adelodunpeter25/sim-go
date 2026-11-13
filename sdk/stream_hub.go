@@ -13,7 +13,7 @@ import (
 const maxReplay = packetBuffer - 4
 
 // streamIdle is how long a session with no viewers stays up.
-const streamIdle = 30 * time.Second
+const streamIdle = 2 * time.Minute
 
 // backend is one platform's device session: it produces frames into the
 // session and consumes input. Implementations: scrcpy (android), idb (ios).

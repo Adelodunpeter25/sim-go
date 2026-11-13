@@ -1,6 +1,7 @@
 package scrcpy
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -54,8 +55,11 @@ func readHandshake(conn net.Conn) (Meta, error) {
 // (u64 pts+flags, u32 size) followed by the payload.
 func (s *Session) ReadFrame() (Frame, error) {
 	var f Frame
-	head := make([]byte, frameHeadLen)
-	if _, err := readFull(s.video, head); err != nil {
+	if s.vr == nil {
+		s.vr = bufio.NewReaderSize(s.video, 256<<10)
+	}
+	head := s.head[:]
+	if _, err := io.ReadFull(s.vr, head); err != nil {
 		return f, fmt.Errorf("frame header: %w", err)
 	}
 	flags := binary.BigEndian.Uint64(head[0:8])
@@ -64,7 +68,7 @@ func (s *Session) ReadFrame() (Frame, error) {
 		return f, fmt.Errorf("bad frame size %d", size)
 	}
 	payload := make([]byte, size)
-	if _, err := readFull(s.video, payload); err != nil {
+	if _, err := io.ReadFull(s.vr, payload); err != nil {
 		return f, fmt.Errorf("frame payload: %w", err)
 	}
 	f.Config = flags&packetFlagConfig != 0
