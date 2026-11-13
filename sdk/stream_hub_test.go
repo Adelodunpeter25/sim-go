@@ -39,7 +39,7 @@ var testDevs = []Device{
 
 func testHub(be *fakeBackend, starts *int32) *streamHub {
 	h := newStreamHub(func(context.Context) ([]Device, error) { return testDevs, nil })
-	h.open = func(ctx context.Context, platform, id string) (backend, error) {
+	h.open = func(ctx context.Context, platform, id string, _ StreamQuality) (backend, error) {
 		atomic.AddInt32(starts, 1)
 		return be, nil
 	}
@@ -236,7 +236,9 @@ func TestStreamErrors(t *testing.T) {
 			t.Fatalf("%s/%s: err=%v want %v", tc.platform, tc.id, err, tc.want)
 		}
 	}
-	h.open = func(context.Context, string, string) (backend, error) { return nil, errors.New("adb exploded") }
+	h.open = func(context.Context, string, string, StreamQuality) (backend, error) {
+		return nil, errors.New("adb exploded")
+	}
 	if _, err := c.Stream(ctx, "android", "emulator-5554"); !errors.Is(err, ErrBackendStart) {
 		t.Fatalf("err=%v want ErrBackendStart", err)
 	}

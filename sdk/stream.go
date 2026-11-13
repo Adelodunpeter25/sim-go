@@ -29,6 +29,29 @@ const (
 	PacketDelta
 )
 
+// StreamQuality tunes the encoder when a session starts. Zero fields keep
+// the defaults (Android 1280px/60fps/6Mbps, iOS native/30fps).
+type StreamQuality struct {
+	MaxSize int     // Android: longest edge in pixels
+	MaxFPS  int     // frames per second
+	BitRate int     // bits per second
+	Scale   float64 // iOS: 1.0 = native pixels
+}
+
+func (q StreamQuality) iosFPS() uint64 {
+	if q.MaxFPS > 0 {
+		return uint64(q.MaxFPS)
+	}
+	return iosFps
+}
+
+func (q StreamQuality) iosScale() float64 {
+	if q.Scale > 0 {
+		return q.Scale
+	}
+	return iosScale
+}
+
 // StreamMeta describes the video the stream carries.
 type StreamMeta struct {
 	Width  int    `json:"width"`

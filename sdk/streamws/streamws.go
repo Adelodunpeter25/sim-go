@@ -6,7 +6,9 @@
 //	server -> client  binary  [1] avcC description | [2] key frame | [3] delta
 //	client -> server  text    sdk.Input JSON (touch, scroll, key, text, button, reset)
 //
-// Query: ?platform=android|ios&id=<serial|avd|udid|name>. Failures before the
+// Query: ?platform=android|ios&id=<serial|avd|udid|name>, plus optional encoder
+// settings max_size, max_fps, bitrate (bits/s) and scale (iOS, 0<scale<=1);
+// they only apply when this viewer starts the device session. Failures before the
 // upgrade are JSON {"ok":false,"error":..} with 400 (bad platform), 404
 // (unknown or not booted device) or 502 (backend failed to start).
 //
@@ -18,6 +20,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/Adelodunpeter25/sim-go/sdk"
@@ -52,7 +56,7 @@ func Handler(c *sdk.Client) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		st, err := c.Stream(r.Context(), q.Get("platform"), q.Get("id"))
+		st, err := c.StreamWith(r.Context(), q.Get("platform"), q.Get("id"), QualityFromQuery(q))
 		if err != nil {
 			writeError(w, err.Error(), statusFor(err))
 			return
@@ -165,5 +169,25 @@ func tagged(tag byte, data []byte) []byte {
 	out := make([]byte, 1+len(data))
 	out[0] = tag
 	copy(out[1:], data)
+	return out
+}
+
+// QualityFromQuery reads the optional encoder settings. Bad or out-of-range
+// values are ignored so a typo never blocks a stream.
+func QualityFromQuery(q url.Values) sdk.StreamQuality {
+	num := func(key string, lo, hi int) int {
+		n, err := strconv.Atoi(q.Get(key))
+		if err != nil || n < lo || n > hi {
+			return 0
+		}
+		return n
+	}
+	var out sdk.StreamQuality
+	out.MaxSize = num("max_size", 240, 4096)
+	out.MaxFPS = num("max_fps", 5, 60)
+	out.BitRate = num("bitrate", 200_000, 50_000_000)
+	if f, err := strconv.ParseFloat(q.Get("scale"), 64); err == nil && f >= 0.25 && f <= 1 {
+		out.Scale = f
+	}
 	return out
 }

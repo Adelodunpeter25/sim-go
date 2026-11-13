@@ -320,7 +320,7 @@ func runIOSProbe(ctx context.Context, udid string) {
 	fmt.Printf("stream: %s %dx%d px (%dx%d pt)\n",
 		sess.Desc.GetTargetDescription().GetName(),
 		dims.GetWidth(), dims.GetHeight(), dims.GetWidthPoints(), dims.GetHeightPoints())
-	vs, err := sess.StartVideo(30, 1)
+	vs, err := sess.StartVideo(30, 1, 0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stream-probe: video: %v\n", err)
 		exit(1)

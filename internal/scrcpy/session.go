@@ -69,7 +69,28 @@ func sdkCandidates() []string {
 	return out
 }
 
-func start(ctx context.Context, serial string) (*Session, error) {
+// Options tunes the device encoder. Zero fields take the defaults.
+type Options struct {
+	MaxSize int // longest edge in pixels
+	MaxFPS  int
+	BitRate int // bits per second
+}
+
+func (o Options) withDefaults() Options {
+	if o.MaxSize <= 0 {
+		o.MaxSize = 1280
+	}
+	if o.MaxFPS <= 0 {
+		o.MaxFPS = 60
+	}
+	if o.BitRate <= 0 {
+		o.BitRate = 6_000_000
+	}
+	return o
+}
+
+func start(ctx context.Context, serial string, opts Options) (*Session, error) {
+	opts = opts.withDefaults()
 	adb := adbPath()
 	server, err := EnsureServer(ctx)
 	if err != nil {
@@ -119,7 +140,8 @@ func start(ctx context.Context, serial string) (*Session, error) {
 		"com.genymobile.scrcpy.Server", Version,
 		"scid="+scid, "log_level=warn", "tunnel_forward=true",
 		"audio=false", "control=true", "video_codec=h264",
-		"max_size=1280", "max_fps=60", "video_bit_rate=6000000",
+		"max_size="+strconv.Itoa(opts.MaxSize), "max_fps="+strconv.Itoa(opts.MaxFPS),
+		"video_bit_rate="+strconv.Itoa(opts.BitRate),
 		"clipboard_autosync=true", "power_on=true", "cleanup=true",
 	)
 	// Server stderr is the only witness when the device side dies early.
@@ -184,6 +206,11 @@ func needsPush(localSize int64, statOutput []byte, statErr error) bool {
 
 // Start opens a session against a connected emulator serial.
 func Start(ctx context.Context, serial string) (*Session, error) {
+	return StartWith(ctx, serial, Options{})
+}
+
+// StartWith is Start with encoder options.
+func StartWith(ctx context.Context, serial string, opts Options) (*Session, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	type result struct {
@@ -192,7 +219,7 @@ func Start(ctx context.Context, serial string) (*Session, error) {
 	}
 	ch := make(chan result, 1)
 	go func() {
-		s, err := start(ctx, serial)
+		s, err := start(ctx, serial, opts)
 		ch <- result{s, err}
 	}()
 	select {

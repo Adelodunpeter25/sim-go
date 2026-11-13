@@ -21,7 +21,7 @@ import (
 
 const (
 	iosFps            = 30
-	iosScale          = 1.0 // native pixels; meta and input math assume this
+	iosScale          = 1.0 // native pixels
 	iosDragThreshold  = 8.0 // points of travel that turn a press into a drag
 	iosSwipeDragSecs  = 0.2
 	iosSwipeScrollSec = 0.1
@@ -237,13 +237,16 @@ type iosBackend struct {
 	started time.Time
 	touch   iosTouch
 	restart chan struct{} // buffered(1): reopen the video pipe
+	fps     uint64
+	scale   float64
+	bitrate int
 
 	mu sync.Mutex
 	ss *session
 	vs *idb.VideoStream
 }
 
-func openIOS(ctx context.Context, udid string) (backend, error) {
+func openIOS(ctx context.Context, udid string, q StreamQuality) (backend, error) {
 	lease, err := idb.DefaultPool.Acquire(ctx, udid)
 	if err != nil {
 		return nil, err
@@ -251,6 +254,7 @@ func openIOS(ctx context.Context, udid string) (backend, error) {
 	return &iosBackend{
 		lease: lease, ib: lease.Session,
 		started: time.Now(), restart: make(chan struct{}, 1),
+		fps: q.iosFPS(), scale: q.iosScale(), bitrate: q.BitRate,
 	}, nil
 }
 
@@ -267,7 +271,7 @@ func (b *iosBackend) pump(ss *session) {
 	b.ss = ss
 	b.mu.Unlock()
 
-	vs, err := b.ib.StartVideo(iosFps, iosScale)
+	vs, err := b.ib.StartVideo(b.fps, b.scale, b.bitrate)
 	if err != nil {
 		return
 	}
@@ -296,7 +300,7 @@ func (b *iosBackend) pump(ss *session) {
 				continue
 			}
 			vs.Stop()
-			if vs, err = b.ib.StartVideo(iosFps, iosScale); err != nil {
+			if vs, err = b.ib.StartVideo(b.fps, b.scale, b.bitrate); err != nil {
 				return
 			}
 			b.mu.Lock()
@@ -312,7 +316,7 @@ func (b *iosBackend) pump(ss *session) {
 				}
 				// The pipe died while the session is still active; try to reopen it.
 				vs.Stop()
-				if vs, err = b.ib.StartVideo(iosFps, iosScale); err != nil {
+				if vs, err = b.ib.StartVideo(b.fps, b.scale, b.bitrate); err != nil {
 					return
 				}
 				b.mu.Lock()

@@ -35,7 +35,7 @@ type streamHub struct {
 	sessions map[string]*session
 	idle     time.Duration
 	list     func(ctx context.Context) ([]Device, error)
-	open     func(ctx context.Context, platform, id string) (backend, error)
+	open     func(ctx context.Context, platform, id string, q StreamQuality) (backend, error)
 }
 
 func newStreamHub(list func(context.Context) ([]Device, error)) *streamHub {
@@ -47,12 +47,12 @@ func newStreamHub(list func(context.Context) ([]Device, error)) *streamHub {
 	}
 }
 
-func openBackend(ctx context.Context, platform, id string) (backend, error) {
+func openBackend(ctx context.Context, platform, id string, q StreamQuality) (backend, error) {
 	switch platform {
 	case "android":
-		return openAndroid(ctx, id)
+		return openAndroid(ctx, id, q)
 	case "ios":
-		return openIOS(ctx, id)
+		return openIOS(ctx, id, q)
 	}
 	return nil, ErrInvalidPlatform
 }
@@ -64,6 +64,12 @@ func openBackend(ctx context.Context, platform, id string) (backend, error) {
 // Errors: ErrInvalidPlatform, ErrDeviceNotFound (also not booted), or
 // ErrBackendStart (check with errors.Is).
 func (c *Client) Stream(ctx context.Context, platform, id string) (*Stream, error) {
+	return c.StreamWith(ctx, platform, id, StreamQuality{})
+}
+
+// StreamWith is Stream with encoder settings. A session is shared, so the
+// settings only apply when this call starts it; later viewers join as-is.
+func (c *Client) StreamWith(ctx context.Context, platform, id string, q StreamQuality) (*Stream, error) {
 	if platform != "android" && platform != "ios" {
 		return nil, ErrInvalidPlatform
 	}
@@ -73,7 +79,7 @@ func (c *Client) Stream(ctx context.Context, platform, id string) (*Stream, erro
 	}
 	// A session can end between lookup and attach; one retry starts a new one.
 	for i := 0; i < 2; i++ {
-		ss, err := c.hub.session(platform, rid)
+		ss, err := c.hub.session(platform, rid, q)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +142,7 @@ func resolveUDID(devs []Device, id string) (string, error) {
 }
 
 // session returns the shared session for platform:id, starting it if needed.
-func (h *streamHub) session(platform, id string) (*session, error) {
+func (h *streamHub) session(platform, id string, q StreamQuality) (*session, error) {
 	key := platform + ":" + id
 	h.mu.Lock()
 	if ss, ok := h.sessions[key]; ok {
@@ -146,7 +152,7 @@ func (h *streamHub) session(platform, id string) (*session, error) {
 	h.mu.Unlock()
 
 	// The session outlives the caller's request: keep values, drop cancel.
-	be, err := h.open(context.WithoutCancel(context.Background()), platform, id)
+	be, err := h.open(context.WithoutCancel(context.Background()), platform, id, q)
 	if err != nil {
 		return nil, &tagged{err: err, kind: ErrBackendStart}
 	}

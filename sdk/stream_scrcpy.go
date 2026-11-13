@@ -17,8 +17,8 @@ var buttonKeycodes = map[string]int{
 // androidBackend drives a scrcpy session.
 type androidBackend struct{ sc *scrcpy.Session }
 
-func openAndroid(ctx context.Context, serial string) (backend, error) {
-	sc, err := scrcpy.Start(ctx, serial)
+func openAndroid(ctx context.Context, serial string, q StreamQuality) (backend, error) {
+	sc, err := scrcpy.StartWith(ctx, serial, scrcpy.Options{MaxSize: q.MaxSize, MaxFPS: q.MaxFPS, BitRate: q.BitRate})
 	if err != nil {
 		return nil, err
 	}

@@ -23,7 +23,7 @@ type VideoStream struct {
 
 // StartVideo opens the device video pipe: H264 at the given fps and scale
 // (1.0 = native). Proven live: valid Annex-B with SPS/PPS/IDR.
-func (s *Session) StartVideo(fps uint64, scale float64) (*VideoStream, error) {
+func (s *Session) StartVideo(fps uint64, scale float64, bitrate int) (*VideoStream, error) {
 	if fps == 0 {
 		fps = 30
 	}
@@ -45,6 +45,7 @@ func (s *Session) StartVideo(fps uint64, scale float64) (*VideoStream, error) {
 			Format:      gen.VideoStreamRequest_H264,
 			Fps:         fps,
 			ScaleFactor: scale,
+			AvgBitrate:  float64(bitrate),
 		}},
 	}); err != nil {
 		vs.Close()
