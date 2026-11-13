@@ -169,6 +169,18 @@ $('openurl').onclick = async () => {
 let ws = null, decoder = null, streamW = 0, streamH = 0, seq = 0, gotFrame = false;
 const canvas = $('view'), statusEl = $('status');
 
+let pendingFrame = null, rafId = 0;
+function paint() {
+  rafId = 0;
+  const frame = pendingFrame; pendingFrame = null;
+  if (!frame) return;
+  if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+    canvas.width = frame.displayWidth; canvas.height = frame.displayHeight;
+  }
+  canvas.getContext('2d', { alpha: false, desynchronized: true }).drawImage(frame, 0, 0);
+  frame.close();
+  if (!gotFrame) { gotFrame = true; setStatus('streaming'); }
+}
 function setStatus(s) { statusEl.textContent = s; }
 // needKey is true while the decoder has no picture yet, or after a reconfigure:
 // the next chunk must be a keyframe or WebCodecs throws.
@@ -181,14 +193,13 @@ function ensureDecoder(codec, desc) {
   try {
     decoder = new VideoDecoder({
       output(frame) {
-        canvas.width = frame.displayWidth; canvas.height = frame.displayHeight;
-        canvas.getContext('2d').drawImage(frame, 0, 0);
-        frame.close();
-        if (!gotFrame) { gotFrame = true; setStatus('streaming'); }
+        if (pendingFrame) pendingFrame.close();
+        pendingFrame = frame;
+        if (!rafId) rafId = requestAnimationFrame(paint);
       },
       error(e) { err('decoder: ' + e.message); disconnect(); }
     });
-    decoder.configure({ codec, description: desc });
+    decoder.configure({ codec, description: desc, optimizeForLatency: true });
     return true;
   } catch (e) { err('decoder configure (' + codec + '): ' + e.message); decoder = null; return false; }
 }
@@ -202,6 +213,7 @@ function onBinary(buf) {
   // A joining viewer is sent the cached description before the fresh
   // keyframe is requested, so stale deltas can arrive first: drop them.
   if (needKey && tag !== 2) return;
+  if (tag === 3 && decoder.decodeQueueSize > 4) { needKey = true; send({ type: 'reset' }); return; }
   if (tag === 2) needKey = false;
   try {
     decoder.decode(new EncodedVideoChunk({ type: tag === 2 ? 'key' : 'delta', timestamp: (seq++) * 1000, data: payload }));
