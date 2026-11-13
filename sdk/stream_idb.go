@@ -236,10 +236,14 @@ type iosBackend struct {
 	ib      *idb.Session
 	started time.Time
 	touch   iosTouch
-	restart chan struct{} // buffered(1): reopen the video pipe
-	fps     uint64
-	scale   float64
-	bitrate int
+
+	scrollMu      sync.Mutex
+	scrollPending *Input
+	scrollBusy    bool
+	restart       chan struct{} // buffered(1): reopen the video pipe
+	fps           uint64
+	scale         float64
+	bitrate       int
 
 	mu sync.Mutex
 	ss *session
@@ -410,13 +414,10 @@ func (b *iosBackend) input(in Input) error {
 		}
 		return nil
 	case "scroll":
-		// The page sends Android-style deltas in stream pixels. A swipe from
-		// the pointer along the delta is the natural-scroll equivalent.
-		x, y := toPoint(in.X, in.Y)
-		endX, endY := x+in.DX/pxX, y+in.DY/pxY
-		return b.do(func(ctx context.Context) error {
-			return b.ib.Swipe(ctx, x, y, endX, endY, iosSwipeScrollSec)
-		})
+		// A wheel burst would queue one blocking HID swipe each and stall
+		// every later input. Merge pending deltas; one worker drains them.
+		b.queueScroll(in)
+		return nil
 	case "key":
 		// Unknown codes are a no-op rather than an error, like Android.
 		return b.do(func(ctx context.Context) error {
@@ -436,6 +437,43 @@ func (b *iosBackend) input(in Input) error {
 		return nil
 	}
 	return fmt.Errorf("unknown input type %q", in.Type)
+}
+
+// queueScroll merges in into the pending scroll (deltas add up, the latest
+// pointer position wins) and starts the worker if none is running.
+func (b *iosBackend) queueScroll(in Input) {
+	b.scrollMu.Lock()
+	if b.scrollPending != nil {
+		in.DX += b.scrollPending.DX
+		in.DY += b.scrollPending.DY
+	}
+	b.scrollPending = &in
+	start := !b.scrollBusy
+	b.scrollBusy = true
+	b.scrollMu.Unlock()
+	if start {
+		go b.drainScroll()
+	}
+}
+
+func (b *iosBackend) drainScroll() {
+	pxX, pxY := b.ib.Points()
+	for {
+		b.scrollMu.Lock()
+		in := b.scrollPending
+		b.scrollPending = nil
+		if in == nil {
+			b.scrollBusy = false
+			b.scrollMu.Unlock()
+			return
+		}
+		b.scrollMu.Unlock()
+		x, y := float64(in.X)/pxX, float64(in.Y)/pxY
+		endX, endY := x+in.DX/pxX, y+in.DY/pxY
+		_ = b.do(func(ctx context.Context) error {
+			return b.ib.Swipe(ctx, x, y, endX, endY, iosSwipeScrollSec)
+		})
+	}
 }
 
 // iosTouch keeps the in-flight pointer gesture. iOS HID has no "move" event,
